@@ -1,0 +1,11 @@
+allowBuilds:
+  electron: true
+  esbuild: true
+  electron-winstaller: false
+# Один исправленный KaTeX для Markdown и транзитивных зависимостей Mermaid.
+overrides:
+  katex: 0.19.1
+minimumReleaseAgeExclude:
+  - electron@45.3.0
+  - lucide-react@1.72.0
+  - vite@8.3.8

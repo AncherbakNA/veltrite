@@ -1,0 +1,72 @@
+name: Сборка релиза
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Сборка · ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: mac-arm64
+            task: dist:mac
+          - os: macos-latest
+            target: mac-x64
+            task: dist:mac:x64
+          - os: windows-latest
+            target: win-x64
+            task: dist:win
+    runs-on: ${{ matrix.os }}
+    env:
+      VELTRITE_RELEASE_REPOSITORY: ${{ github.repository }}
+      VELTRITE_GITHUB_CLIENT_ID: ${{ vars.VELTRITE_GITHUB_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Проверить версию тега
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/verify-tag.mjs
+      - name: Проверить исходники
+        run: pnpm check
+      - name: Проверить синхронизацию
+        run: pnpm test
+      - name: Собрать установщики
+        run: node scripts/workspace.mjs ${{ matrix.task }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Veltrite-${{ matrix.target }}
+          path: |
+            ../Veltrite-local/releases/*.dmg
+            ../Veltrite-local/releases/*.exe
+            ../Veltrite-local/releases/*.zip
+          if-no-files-found: error
+  draft:
+    name: Подготовить черновик GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ../Veltrite-release
+          merge-multiple: true
+      - name: Создать контрольные суммы
+        run: node scripts/checksums.mjs ../Veltrite-release
+      - name: Создать черновик релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Veltrite $GITHUB_REF_NAME" --notes-file docs/Описание-релиза.md ../Veltrite-release/*

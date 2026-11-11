@@ -1,0 +1,21 @@
+{
+  "id": "writing-helper",
+  "name": "Помощник заметок",
+  "description": "Короткие заготовки для записи мыслей",
+  "version": "1.0.0",
+  "enabled": false,
+  "commands": [
+    {
+      "id": "idea",
+      "name": "Вставить заготовку идеи",
+      "action": "insert",
+      "value": "## Идея\n\nЧто я заметил:\n\nС чем это связано:\n\nСледующий шаг:\n"
+    },
+    {
+      "id": "new-project",
+      "name": "Создать заметку проекта",
+      "action": "create",
+      "value": "Проекты/Новый проект"
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "name": "veltrite",
+  "productName": "Veltrite",
+  "version": "0.1.0",
+  "description": "Локальная база знаний с Markdown и зашифрованной синхронизацией через GitHub",
+  "author": "Veltrite contributors",
+  "license": "MIT",
+  "private": true,
+  "main": "dist-electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/workspace.mjs dev",
+    "build": "node scripts/workspace.mjs build",
+    "check": "node scripts/workspace.mjs check",
+    "test": "node scripts/workspace.mjs test",
+    "test:e2e": "node scripts/workspace.mjs e2e",
+    "dist:mac": "node scripts/workspace.mjs dist:mac",
+    "dist:win": "node scripts/workspace.mjs dist:win",
+    "format": "node scripts/workspace.mjs format"
+  },
+  "dependencies": {
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "^6.11.3",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "6.43.15",
+    "codemirror": "6.0.2",
+    "katex": "0.19.1",
+    "lucide-react": "1.72.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-markdown": "10.1.0",
+    "rehype-katex": "7.0.1",
+    "remark-gfm": "4.0.1",
+    "remark-math": "6.0.0",
+    "yaml": "^2.8.1",
+    "@lezer/highlight": "^1.2.3",
+    "mermaid": "^11.12.0",
+    "@codemirror/search": "^6.5.11",
+    "@replit/codemirror-vim": "^6.3.0",
+    "jsep": "^1.4.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "electron": "45.3.0",
+    "electron-builder": "26.18.0",
+    "esbuild": "^0.27.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.8",
+    "vitest": "5.1.0",
+    "prettier": "^3.6.2"
+  },
+  "build": {
+    "appId": "app.veltrite.desktop",
+    "productName": "Veltrite",
+    "asar": true,
+    "directories": {
+      "output": "../releases",
+      "buildResources": "resources"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.txt"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "darkModeSupport": true,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Veltrite использует микрофон, когда вы запускаете запись в заметку."
+      },
+      "identity": "-",
+      "icon": "icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "icon.ico",
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico"
+    },
+    "artifactName": "Veltrite-${version}-${os}-${arch}.${ext}",
+    "publish": null,
+    "extraResources": [
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      }
+    ]
+  },
+  "packageManager": "pnpm@11.25.0"
+}
