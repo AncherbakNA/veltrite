@@ -1,4 +1,4 @@
-import { CalendarDays, FileText, PanelsTopLeft, Plus, Star, Table2 } from "lucide-react";
+import { FileText, PanelsTopLeft, Plus, Star, Table2 } from "lucide-react";
 import { modifiedAgo } from "../../shared/format";
 import type { FileEntry, VaultInfo } from "../../shared/types";
 import { fileTitle } from "../ui";
@@ -82,10 +82,6 @@ export default function WorkspaceHome({
         <button onClick={() => onAction("new-base")}>
           <Table2 size={16} />
           Новая база
-        </button>
-        <button onClick={() => onAction("daily")}>
-          <CalendarDays size={16} />
-          Сегодня
         </button>
       </div>
       {!files.length ? (
