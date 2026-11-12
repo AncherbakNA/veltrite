@@ -1,31 +1,19 @@
-import {
-  ArrowRight,
-  CalendarDays,
-  Clock3,
-  FileText,
-  FolderOpen,
-  PanelsTopLeft,
-  Plus,
-  Table2,
-} from "lucide-react";
-import type { FileEntry, NoteIndex, VaultInfo } from "../../shared/types";
-import { fileTitle, primaryKey } from "../ui";
+import { CalendarDays, FileText, PanelsTopLeft, Plus, Star, Table2 } from "lucide-react";
+import { modifiedAgo } from "../../shared/format";
+import type { FileEntry, VaultInfo } from "../../shared/types";
+import { fileTitle } from "../ui";
 
 interface WorkspaceHomeProps {
   vault: VaultInfo;
-  index: NoteIndex[];
   recentPaths: string[];
   onOpen: (path: string) => void;
   onAction: (action: string) => void;
-  onFilter: (kind: "all" | "note" | "canvas" | "base") => void;
 }
 export default function WorkspaceHome({
   vault,
-  index,
   recentPaths,
   onOpen,
   onAction,
-  onFilter,
 }: WorkspaceHomeProps) {
   const files = vault.files.filter((file) =>
     ["note", "canvas", "base"].includes(file.kind),
@@ -41,133 +29,90 @@ export default function WorkspaceHome({
   ]
     .map((path) => files.find((file) => file.path === path))
     .filter((file): file is FileEntry => !!file)
-    .slice(0, 10);
-  const collections = [
-    { kind: "note", Icon: FileText, label: "Заметки", count: index.length },
-    {
-      kind: "canvas",
-      Icon: PanelsTopLeft,
-      label: "Холсты",
-      count: files.filter((file) => file.kind === "canvas").length,
-    },
-    {
-      kind: "base",
-      Icon: Table2,
-      label: "Базы",
-      count: files.filter((file) => file.kind === "base").length,
-    },
-  ] as const;
-  return (
-    <div className="workspace-home">
-      <div className="home-heading">
-        <div>
-          <span className="home-path">
-            <FolderOpen size={13} />
-            Хранилище
-          </span>
-          <h1>{vault.name}</h1>
-        </div>
-        <button className="home-daily" onClick={() => onAction("daily")}>
-          <CalendarDays size={16} />
-          Заметка на сегодня
-        </button>
-      </div>
-      <div className="home-collections" role="group" aria-label="Коллекции файлов">
-        {collections.map(({ kind, Icon, label, count }) => (
+    .slice(0, 12);
+  const bookmarks = vault.preferences.bookmarks
+    .map((path) => files.find((file) => file.path === path))
+    .filter((file): file is FileEntry => !!file);
+  const rows = (entries: FileEntry[]) => (
+    <div className="recent-files">
+      {entries.map((file) => {
+        const Icon =
+          file.kind === "canvas"
+            ? PanelsTopLeft
+            : file.kind === "base"
+              ? Table2
+              : FileText;
+        return (
           <button
-            key={kind}
-            aria-label={"Открыть " + label.toLocaleLowerCase()}
-            onClick={() => onFilter(kind)}
+            className="recent-file"
+            key={file.path}
+            title={file.path}
+            onClick={() => onOpen(file.path)}
           >
             <Icon size={16} />
-            <span>{label}</span>
-            <b>{count}</b>
+            <span className="recent-file-name">{fileTitle(file.path)}</span>
+            <span className="recent-file-folder">
+              {file.path.includes("/")
+                ? file.path.split("/").slice(0, -1).join(" / ")
+                : "—"}
+            </span>
+            <time
+              dateTime={new Date(file.modified).toISOString()}
+              title={new Date(file.modified).toLocaleString("ru-RU")}
+            >
+              {modifiedAgo(file.modified)}
+            </time>
           </button>
-        ))}
-      </div>
+        );
+      })}
+    </div>
+  );
+  return (
+    <div className="workspace-home">
+      <h1>Главная</h1>
       <div className="home-create-actions">
         <button onClick={() => onAction("new-note")}>
-          <Plus size={15} />
-          Создать заметку<kbd>{primaryKey} N</kbd>
+          <Plus size={16} />
+          Новая заметка
         </button>
         <button onClick={() => onAction("new-canvas")}>
-          <PanelsTopLeft size={15} />
-          Создать холст
+          <PanelsTopLeft size={16} />
+          Новый холст
         </button>
         <button onClick={() => onAction("new-base")}>
-          <Table2 size={15} />
-          Создать базу
+          <Table2 size={16} />
+          Новая база
+        </button>
+        <button onClick={() => onAction("daily")}>
+          <CalendarDays size={16} />
+          Сегодня
         </button>
       </div>
-      <section className="home-recent">
-        <div className="home-section-heading">
-          <div>
-            <Clock3 size={15} />
-            <h2>Недавние файлы</h2>
-          </div>
-          <button onClick={() => onAction("quick-open")}>
-            Все файлы
-            <ArrowRight size={14} />
-          </button>
+      {!files.length ? (
+        <div className="home-first-note">
+          <p>В хранилище пока нет файлов.</p>
+          <p>
+            Создайте заметку через «+» или перетащите файлы в папку хранилища. Для ссылки
+            между заметками используйте <code>[[Название]]</code>.
+          </p>
         </div>
-        {recent.length ? (
-          <div className="recent-files">
-            {recent.map((file) => {
-              const Icon =
-                file.kind === "canvas"
-                  ? PanelsTopLeft
-                  : file.kind === "base"
-                    ? Table2
-                    : FileText;
-              return (
-                <button
-                  className="recent-file"
-                  key={file.path}
-                  title={file.path}
-                  onClick={() => onOpen(file.path)}
-                >
-                  <Icon size={17} className={"kind-icon kind-" + file.kind} />
-                  <span className="recent-file-name">{fileTitle(file.path)}</span>
-                  <span className="recent-file-folder">
-                    {file.path.includes("/")
-                      ? file.path.split("/").slice(0, -1).join(" / ")
-                      : "—"}
-                  </span>
-                  <span className="recent-file-type">
-                    {file.kind === "canvas"
-                      ? "Холст"
-                      : file.kind === "base"
-                        ? "База"
-                        : "Заметка"}
-                  </span>
-                  <time>
-                    {new Date(file.modified).toLocaleDateString("ru-RU", {
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </time>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="home-first-note">
-            <p>В хранилище пока нет файлов.</p>
-            <button onClick={() => onAction("new-note")}>
-              <Plus size={15} />
-              Создать первую заметку
-            </button>
-          </div>
-        )}
-      </section>
-      <div className="home-shortcuts">
-        <span>
-          Перейти к файлу <kbd>{primaryKey} O</kbd>
-        </span>
-        <span>
-          Команды <kbd>{primaryKey} P</kbd>
-        </span>
-      </div>
+      ) : (
+        <>
+          <section className="home-recent">
+            <h2>Недавние файлы</h2>
+            {rows(recent)}
+          </section>
+          {bookmarks.length > 0 && (
+            <section className="home-bookmarks">
+              <h2>
+                <Star size={16} />
+                Закладки
+              </h2>
+              {rows(bookmarks)}
+            </section>
+          )}
+        </>
+      )}
     </div>
   );
 }

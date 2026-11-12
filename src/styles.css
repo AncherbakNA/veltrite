@@ -258,7 +258,7 @@ kbd {
   min-width: 0;
   flex: 1;
   overflow: auto;
-  padding: 24px 48px 80px;
+  padding: 8px 32px 64px;
   scrollbar-color: var(--border) transparent;
   scrollbar-width: thin;
 }
@@ -272,6 +272,8 @@ kbd {
   font-family: var(--note-font);
   width: 100%;
   max-width: 68ch;
+  font-family: var(--note-font);
+  font-size: var(--editor-size);
   margin: 0 auto;
 }
 .mode-split > .writing-pane,

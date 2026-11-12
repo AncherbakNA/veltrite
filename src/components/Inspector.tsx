@@ -1,12 +1,11 @@
 import {
   AlignLeft,
+  ChevronRight,
   FileText,
   Hash,
   Link2,
-  PanelsTopLeft,
   Plus,
   SlidersHorizontal,
-  Table2,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -41,80 +40,16 @@ export default function Inspector({
   setDialog,
   onClose,
 }: InspectorProps) {
-  const [rightTab, setRightTab] = useState("outline");
-  const canvas = /\.canvas$/i.test(currentPath || ""),
-    base = /\.base$/i.test(currentPath || "");
+  const [sections, setSections] = useState<Record<string, boolean>>({
+    outline: true,
+    links: true,
+  });
   const tabs = [
     ["outline", AlignLeft, "Содержание"],
-    ["links", Link2, "Связи"],
+    ["links", Link2, "Обратные ссылки"],
     ["properties", SlidersHorizontal, "Свойства"],
     ["footnotes", Hash, "Сноски"],
   ] as const;
-  if (canvas || base) {
-    const Icon = canvas ? PanelsTopLeft : Table2;
-    const tips = canvas
-      ? [
-          [
-            "Добавьте карточки",
-            "Текст, заметки, изображения и ссылки — на панели над холстом.",
-          ],
-          [
-            "Покажите связи",
-            "Нажмите «Связь», затем выберите начальную и конечную карточку.",
-          ],
-          [
-            "Посмотрите шире",
-            "Инструмент «Перемещение» двигает холст. Масштаб — внизу справа.",
-          ],
-        ]
-      : [
-          [
-            "Выберите представление",
-            "Таблица, карточки, список или доска — в меню над базой.",
-          ],
-          ["Уточните выборку", "Поле фильтра ищет по названиям и значениям свойств."],
-          [
-            "Меняйте свойства на месте",
-            "Дважды нажмите на ячейку, чтобы изменить свойство заметки.",
-          ],
-        ];
-    return (
-      <aside className="inspector context-inspector" aria-label="Подсказки инструмента">
-        <div className="inspector-heading">
-          <strong>{canvas ? "Работа с холстом" : "Работа с базой"}</strong>
-          <button className="icon-button" aria-label="Закрыть панель" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </div>
-        <div className="inspector-content">
-          <span className={"context-tool-icon " + (canvas ? "kind-canvas" : "kind-base")}>
-            <Icon size={27} />
-          </span>
-          <h3>{canvas ? "Карточки и связи" : "Представления базы"}</h3>
-          <p className="context-intro">
-            {canvas
-              ? "Добавляйте карточки и соединяйте их связями."
-              : "База показывает ваши файлы в удобном представлении."}
-          </p>
-          <ol className="tool-tips">
-            {tips.map(([title, text], i) => (
-              <li key={title}>
-                <span>{i + 1}</span>
-                <div>
-                  <strong>{title}</strong>
-                  <p>{text}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </div>
-        <div className="inspector-footer">
-          <span className="local-indicator" />
-          Изменения сохраняются автоматически
-        </div>
-      </aside>
-    );
-  }
   return (
     <aside className="inspector" aria-label="Информация о заметке">
       <div className="inspector-heading">
@@ -128,147 +63,155 @@ export default function Inspector({
           <X size={16} />
         </button>
       </div>
-      <div className="inspector-tabs">
+      <div className="inspector-content inspector-sections">
         {tabs.map(([id, Icon, title]) => (
-          <button
-            className={rightTab === id ? "active" : ""}
-            key={id}
-            title={title}
-            aria-pressed={rightTab === id}
-            onClick={() => setRightTab(id)}
-          >
-            <Icon size={16} />
-            <span>{title}</span>
-          </button>
-        ))}
-      </div>
-      <div className="inspector-content">
-        {rightTab === "outline" && (
-          <>
-            <span className="eyebrow">Содержание</span>
-            {currentIndex?.headings.length ? (
-              currentIndex.headings.map((h, i) => (
-                <button
-                  className="outline-row"
-                  key={i}
-                  style={{ paddingLeft: (h.level - 1) * 12 }}
-                  onClick={() => {
-                    if (mode === "read")
-                      document
-                        .getElementById(h.text.toLowerCase().replace(/\s/g, "-"))
-                        ?.scrollIntoView({ behavior: "smooth" });
-                    else
-                      window.dispatchEvent(
-                        new CustomEvent("veltrite:goto", {
-                          detail: h.line,
-                        }),
-                      );
-                  }}
-                >
-                  {h.text}
-                </button>
-              ))
-            ) : (
-              <p className="empty-small">Заголовки заметки появятся здесь</p>
-            )}
-            {currentIndex?.tags.length ? (
-              <>
-                <span className="eyebrow section-spaced">Теги заметки</span>
-                <div className="tags-wrap">
-                  {currentIndex.tags.map((t) => (
-                    <button className="tag" key={t} onClick={() => setSection("tags")}>
-                      #{t}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </>
-        )}
-        {rightTab === "links" && (
-          <>
-            <span className="eyebrow">
-              Обратные ссылки <b>{backlinks.length}</b>
-            </span>
-            {backlinks.map((n) => (
-              <button className="simple-row" key={n.path} onClick={() => open(n.path)}>
-                <FileText size={14} />
-                {n.title}
-              </button>
-            ))}
-            {!backlinks.length && (
-              <p className="empty-small">На эту заметку пока нет ссылок</p>
-            )}
-            <span className="eyebrow section-spaced">
-              Исходящие ссылки <b>{outgoing.length}</b>
-            </span>
-            {outgoing.map((n, i) => (
-              <button
-                className={"simple-row " + (!n.resolved ? "unresolved" : "")}
-                key={i}
-                onClick={() => openLink(n.target)}
-              >
-                <Link2 size={14} />
-                {n.target}
-              </button>
-            ))}
-          </>
-        )}
-        {rightTab === "properties" && (
-          <>
-            <span className="eyebrow">Свойства</span>
-            {Object.entries(currentIndex?.properties || {}).map(([key, value]) => (
-              <div className="property-row" key={key}>
-                <label>{key}</label>
-                <input
-                  aria-label={"Свойство " + key}
-                  key={currentPath + key + JSON.stringify(value)}
-                  defaultValue={
-                    typeof value === "object"
-                      ? yamlStringify(value, {
-                          flowCollectionPadding: false,
-                        }).trim()
-                      : String(value)
-                  }
-                  onBlur={(e) => setProperty(key, e.target.value)}
-                />
+          <section className="inspector-section" key={id}>
+            <button
+              className="inspector-section-toggle"
+              aria-label={title}
+              aria-expanded={!!sections[id]}
+              onClick={() => setSections((value) => ({ ...value, [id]: !value[id] }))}
+            >
+              <ChevronRight size={14} className={sections[id] ? "expanded" : ""} />
+              <Icon size={16} />
+              <span>{title}</span>
+              {id === "links" && <small>{backlinks.length}</small>}
+            </button>
+            {sections[id] && (
+              <div className="inspector-section-body">
+                {id === "outline" && (
+                  <>
+                    {currentIndex?.headings.length ? (
+                      currentIndex.headings.map((h, i) => (
+                        <button
+                          className="outline-row"
+                          key={i}
+                          style={{ paddingLeft: (h.level - 1) * 12 }}
+                          onClick={() => {
+                            if (mode === "read")
+                              document
+                                .getElementById(h.text.toLowerCase().replace(/\s/g, "-"))
+                                ?.scrollIntoView({ behavior: "smooth" });
+                            else
+                              window.dispatchEvent(
+                                new CustomEvent("veltrite:goto", {
+                                  detail: h.line,
+                                }),
+                              );
+                          }}
+                        >
+                          {h.text}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="empty-small">Заголовки заметки появятся здесь</p>
+                    )}
+                    {currentIndex?.tags.length ? (
+                      <>
+                        <span className="eyebrow section-spaced">Теги заметки</span>
+                        <div className="tags-wrap">
+                          {currentIndex.tags.map((t) => (
+                            <button
+                              className="tag"
+                              key={t}
+                              onClick={() => setSection("tags")}
+                            >
+                              #{t}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </>
+                )}
+                {id === "links" && (
+                  <>
+                    <span className="eyebrow">
+                      Обратные ссылки <b>{backlinks.length}</b>
+                    </span>
+                    {backlinks.map((n) => (
+                      <button
+                        className="simple-row"
+                        key={n.path}
+                        onClick={() => open(n.path)}
+                      >
+                        <FileText size={14} />
+                        {n.title}
+                      </button>
+                    ))}
+                    {!backlinks.length && (
+                      <p className="empty-small">На эту заметку пока нет ссылок</p>
+                    )}
+                    <span className="eyebrow section-spaced">
+                      Исходящие ссылки <b>{outgoing.length}</b>
+                    </span>
+                    {outgoing.map((n, i) => (
+                      <button
+                        className={"simple-row " + (!n.resolved ? "unresolved" : "")}
+                        key={i}
+                        onClick={() => openLink(n.target)}
+                      >
+                        <Link2 size={14} />
+                        {n.target}
+                      </button>
+                    ))}
+                  </>
+                )}
+                {id === "properties" && (
+                  <>
+                    {Object.entries(currentIndex?.properties || {}).map(
+                      ([key, value]) => (
+                        <div className="property-row" key={key}>
+                          <label>{key}</label>
+                          <input
+                            aria-label={"Свойство " + key}
+                            key={currentPath + key + JSON.stringify(value)}
+                            defaultValue={
+                              typeof value === "object"
+                                ? yamlStringify(value, {
+                                    flowCollectionPadding: false,
+                                  }).trim()
+                                : String(value)
+                            }
+                            onBlur={(e) => setProperty(key, e.target.value)}
+                          />
+                        </div>
+                      ),
+                    )}
+                    {currentIndex && (
+                      <button
+                        className="text-link"
+                        onClick={() =>
+                          setDialog({
+                            title: "Новое свойство",
+                            placeholder: "Название свойства",
+                            confirm: "Добавить",
+                            onSubmit: (key) => setProperty(key, '""'),
+                          })
+                        }
+                      >
+                        <Plus size={13} />
+                        Добавить свойство
+                      </button>
+                    )}
+                  </>
+                )}
+                {id === "footnotes" && (
+                  <>
+                    {footnotes.map((f, i) => (
+                      <p key={i} className="footnote-item">
+                        {f}
+                      </p>
+                    ))}
+                    {!footnotes.length && (
+                      <p className="empty-small">Используйте [^1] и [^1]: текст</p>
+                    )}
+                  </>
+                )}
               </div>
-            ))}
-            {currentIndex && (
-              <button
-                className="text-link"
-                onClick={() =>
-                  setDialog({
-                    title: "Новое свойство",
-                    placeholder: "Название свойства",
-                    confirm: "Добавить",
-                    onSubmit: (key) => setProperty(key, '""'),
-                  })
-                }
-              >
-                <Plus size={13} />
-                Добавить свойство
-              </button>
             )}
-          </>
-        )}
-        {rightTab === "footnotes" && (
-          <>
-            <span className="eyebrow">СНОСКИ</span>
-            {footnotes.map((f, i) => (
-              <p key={i} className="footnote-item">
-                {f}
-              </p>
-            ))}
-            {!footnotes.length && (
-              <p className="empty-small">Используйте [^1] и [^1]: текст</p>
-            )}
-          </>
-        )}
-      </div>
-      <div className="inspector-footer">
-        <FileText size={13} />
-        <span>Markdown · Обычный файл в вашей папке</span>
+          </section>
+        ))}
       </div>
     </aside>
   );

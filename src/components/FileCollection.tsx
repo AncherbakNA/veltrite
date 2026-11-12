@@ -1,59 +1,31 @@
-import { ChevronLeft, FileText, PanelsTopLeft, Plus, Search, Table2 } from "lucide-react";
+import { FileText, PanelsTopLeft, Plus, Search, Table2 } from "lucide-react";
 import { useState } from "react";
 import type { FileEntry, NoteIndex } from "../../shared/types";
 import { fileTitle } from "../ui";
 import type { FileFilter } from "./Sidebar";
-
 interface FileCollectionProps {
   kind: FileFilter;
   files: FileEntry[];
   index: NoteIndex[];
   onOpen: (path: string) => void;
-  onHome: () => void;
   onCreate: (action: string) => void;
 }
 const collections = {
-  all: {
-    title: "Все файлы",
-    description: "",
-    action: "new-note",
-    create: "Новая заметка",
-    Icon: FileText,
-  },
-  note: {
-    title: "Заметки",
-    description: "",
-    action: "new-note",
-    create: "Новая заметка",
-    Icon: FileText,
-  },
-  canvas: {
-    title: "Холсты",
-    description: "",
-    action: "new-canvas",
-    create: "Новый холст",
-    Icon: PanelsTopLeft,
-  },
-  base: {
-    title: "Базы",
-    description: "",
-    action: "new-base",
-    create: "Новая база",
-    Icon: Table2,
-  },
-} as const;
-
+  all: { title: "Все файлы", action: "new-note", create: "Новая заметка" },
+  note: { title: "Заметки", action: "new-note", create: "Новая заметка" },
+  canvas: { title: "Холсты", action: "new-canvas", create: "Новый холст" },
+  base: { title: "Базы", action: "new-base", create: "Новая база" },
+};
 export default function FileCollection({
   kind,
   files,
   index,
   onOpen,
-  onHome,
   onCreate,
 }: FileCollectionProps) {
   const [query, setQuery] = useState("");
-  const info = collections[kind];
-  const notes = new Map(index.map((note) => [note.path, note]));
+  const info = collections[kind],
+    notes = new Map(index.map((note) => [note.path, note]));
   const matching = files.filter(
     (file) =>
       ["note", "canvas", "base"].includes(file.kind) &&
@@ -73,18 +45,9 @@ export default function FileCollection({
     .sort((a, b) => b.modified - a.modified);
   return (
     <section className="file-collection">
-      <button className="collection-back" onClick={onHome}>
-        <ChevronLeft size={14} />
-        Главная
-      </button>
       <div className="collection-heading">
-        <div>
-          <span className="collection-symbol">
-            <info.Icon size={25} />
-          </span>
-          <h1>{info.title}</h1>
-        </div>
-        <button className="primary" onClick={() => onCreate(info.action)}>
+        <h1>{info.title}</h1>
+        <button onClick={() => onCreate(info.action)}>
           <Plus size={16} />
           {info.create}
         </button>
@@ -92,7 +55,7 @@ export default function FileCollection({
       <div className="collection-tools">
         <span>Всего: {matching.length}</span>
         <label>
-          <Search size={15} />
+          <Search size={16} />
           <input
             value={query}
             placeholder="Найти среди файлов…"
@@ -102,72 +65,67 @@ export default function FileCollection({
         </label>
       </div>
       {results.length ? (
-        <div className="collection-grid">
-          {results.map((file) => {
-            const Icon =
-              file.kind === "canvas"
-                ? PanelsTopLeft
-                : file.kind === "base"
-                  ? Table2
-                  : FileText;
-            const note = notes.get(file.path);
-            return (
-              <button
-                className={"collection-card kind-" + file.kind}
-                key={file.path}
-                onClick={() => onOpen(file.path)}
-                title={file.path}
-              >
-                <span className="collection-card-top">
-                  <Icon size={20} />
-                  <span>
-                    {file.kind === "canvas"
-                      ? "Холст"
-                      : file.kind === "base"
-                        ? "База"
-                        : "Заметка"}
-                  </span>
-                </span>
-                <strong>{fileTitle(file.path)}</strong>
-                <small>
-                  {file.path.includes("/")
-                    ? file.path.split("/").slice(0, -1).join(" / ")
-                    : "В корне хранилища"}
-                </small>
-                <span className="collection-card-bottom">
-                  <span>
-                    {note?.tags.slice(0, 2).map((tag) => (
-                      <span className="tag" key={tag}>
-                        #{tag}
-                      </span>
-                    ))}
-                  </span>
-                  <time>
-                    {new Date(file.modified).toLocaleDateString("ru-RU", {
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </time>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        <table className="collection-table">
+          <thead>
+            <tr>
+              <th>Имя</th>
+              <th>Папка</th>
+              <th>Изменено</th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.map((file) => {
+              const Icon =
+                file.kind === "canvas"
+                  ? PanelsTopLeft
+                  : file.kind === "base"
+                    ? Table2
+                    : FileText;
+              return (
+                <tr
+                  key={file.path}
+                  className={"collection-row kind-" + file.kind}
+                  onClick={() => onOpen(file.path)}
+                >
+                  <td>
+                    <button
+                      className="collection-open"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpen(file.path);
+                      }}
+                      title={file.path}
+                    >
+                      <Icon size={16} />
+                      {fileTitle(file.path)}
+                    </button>
+                  </td>
+                  <td>
+                    {file.path.includes("/")
+                      ? file.path.split("/").slice(0, -1).join(" / ")
+                      : "—"}
+                  </td>
+                  <td>
+                    <time
+                      dateTime={new Date(file.modified).toISOString()}
+                      title={new Date(file.modified).toLocaleString("ru-RU")}
+                    >
+                      {new Date(file.modified).toLocaleDateString("ru-RU", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </time>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       ) : (
         <div className="collection-empty">
-          <info.Icon size={32} />
-          <h2>{query ? "Ничего не найдено" : "Здесь пока пусто"}</h2>
-          <p>
-            {query
-              ? "Попробуйте другое название, папку или тег."
-              : "Добавьте первый файл — он появится здесь."}
-          </p>
-          {!query && (
-            <button className="text-link" onClick={() => onCreate(info.action)}>
-              <Plus size={15} />
-              {info.create}
-            </button>
-          )}
+          <h2>{query ? "Ничего не найдено" : "Нет файлов"}</h2>
+          {query && <p>Измените название, папку или тег в запросе.</p>}
         </div>
       )}
     </section>

@@ -643,16 +643,16 @@ function setupIpc() {
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
-    height: 930,
+    height: 900,
     minWidth: 940,
     minHeight: 640,
     title: "Veltrite",
     icon: app.isPackaged
       ? path.join(process.resourcesPath, "icon.png")
       : path.join(__dirname, "../resources/icon.png"),
-    backgroundColor: "#161b24",
+    backgroundColor: "#1b1b1a",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: { x: 18, y: 18 },
+    trafficLightPosition: { x: 16, y: 12 },
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

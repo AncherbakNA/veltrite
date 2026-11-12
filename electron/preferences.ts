@@ -15,6 +15,7 @@ export function mergePreferences(base: Preferences, patch: unknown): Preferences
   if (
     !["dark", "light", "system"].includes(next.theme) ||
     !["serif", "sans", "mono"].includes(next.textFont) ||
+    !["last-note", "home"].includes(next.startupView) ||
     !Number.isFinite(next.fontSize) ||
     next.fontSize < 11 ||
     next.fontSize > 28 ||

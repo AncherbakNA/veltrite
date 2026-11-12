@@ -3,6 +3,7 @@ export interface Preferences {
   theme: Theme;
   fontSize: number;
   textFont: "serif" | "sans" | "mono";
+  startupView: "last-note" | "home";
   lineNumbers: boolean;
   spellcheck: boolean;
   dailyFolder: string;
@@ -19,6 +20,7 @@ export const defaultPreferences: Preferences = {
   theme: "dark",
   fontSize: 16,
   textFont: "serif",
+  startupView: "last-note",
   lineNumbers: false,
   spellcheck: true,
   dailyFolder: "Дневник",

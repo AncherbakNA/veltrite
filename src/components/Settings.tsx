@@ -26,6 +26,7 @@ export default function Settings({
   onClose,
   onError,
   onMessage,
+  onImport,
 }: {
   preferences: Preferences;
   initialTab?: string;
@@ -35,6 +36,7 @@ export default function Settings({
   onClose: () => void;
   onError: (m: string) => void;
   onMessage: (m: string) => void;
+  onImport: () => void;
 }) {
   const [tab, setTab] = useState(initialTab),
     [selectedTheme, setSelectedTheme] = useState(preferences.theme),
@@ -110,11 +112,6 @@ export default function Settings({
               {title}
             </button>
           ))}
-          <div className="settings-brand">
-            <BrandMark size={34} />
-            <strong>Veltrite</strong>
-            <small>Локальные заметки</small>
-          </div>
         </nav>
         <div className="settings-content">
           <button
@@ -244,6 +241,19 @@ export default function Settings({
                   onChange={(e) => update({ fontSize: Number(e.target.value) })}
                 />
               </div>
+              <div className="setting-row">
+                <label htmlFor="startup-view">При запуске открывать</label>
+                <select
+                  id="startup-view"
+                  value={preferences.startupView}
+                  onChange={(e) =>
+                    update({ startupView: e.target.value as Preferences["startupView"] })
+                  }
+                >
+                  <option value="last-note">Последнюю заметку</option>
+                  <option value="home">Главную</option>
+                </select>
+              </div>
               <Toggle
                 label="Ограничить ширину строки"
                 description="Более удобное чтение длинных заметок"
@@ -254,8 +264,7 @@ export default function Settings({
           )}
           {tab === "editor" && (
             <>
-              <h2>Редактор и файлы</h2>
-              <p className="muted">Изменения заметок сохраняются автоматически.</p>
+              <h2>Редактор</h2>
               <Toggle
                 label="Режим Vim"
                 description="Клавиши Vim в редакторе"
@@ -272,6 +281,10 @@ export default function Settings({
                 checked={preferences.spellcheck}
                 onChange={(v) => update({ spellcheck: v })}
               />
+              <div className="setting-row">
+                <span>Копирование готового хранилища</span>
+                <button onClick={onImport}>Импорт из папки</button>
+              </div>
               {(
                 [
                   ["dailyFolder", "Ежедневные заметки"],
@@ -532,7 +545,8 @@ export default function Settings({
             <>
               <h2>Расширения</h2>
               <p className="muted">
-                Команды Veltrite из JSON-манифестов. JavaScript-расширения не поддерживаются.
+                Команды Veltrite из JSON-манифестов. JavaScript-расширения не
+                поддерживаются.
               </p>
               <button
                 onClick={() =>
@@ -571,8 +585,9 @@ export default function Settings({
           )}
           {tab === "about" && (
             <>
-              <div className="about-logo">V</div>
-              <h2>Veltrite</h2>
+              <BrandMark size={40} />
+              <h2>О приложении</h2>
+              <p>Veltrite</p>
               <p className="muted">Заметки, холсты и базы в локальной папке.</p>
               <div className="info-card">
                 Обычные Markdown-файлы, открытый формат холстов JSON Canvas, локальная

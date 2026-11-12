@@ -1,7 +1,7 @@
-import { plural } from "../shared/format";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { mergePreferences } from "../electron/preferences";
+import { plural } from "../shared/format";
 import { defaultPreferences } from "../shared/types";
 
 function luminance(hex: string) {
@@ -49,6 +49,15 @@ describe("Оформление", () => {
 it("склоняет счётчики для единиц, десятков и исключений 11–14", () => {
   const forms = ["связь", "связи", "связей"] as const;
   expect([0, 1, 2, 5, 11, 14, 21, 22, 111, -1].map((n) => plural(n, forms))).toEqual([
-    "0 связей", "1 связь", "2 связи", "5 связей", "11 связей", "14 связей", "21 связь", "22 связи", "111 связей", "-1 связь",
+    "0 связей",
+    "1 связь",
+    "2 связи",
+    "5 связей",
+    "11 связей",
+    "14 связей",
+    "21 связь",
+    "22 связи",
+    "111 связей",
+    "-1 связь",
   ]);
 });

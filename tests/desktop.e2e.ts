@@ -98,9 +98,20 @@ test("экспорт сайта и отдельный веб-просмотр б
   }, output);
   await page.keyboard.press(`${modifier}+p`);
   await page.getByPlaceholder("Найти команду…").fill("экспорт сайта");
-  await page.keyboard.press("Enter");
+  await page
+    .getByRole("button", { name: "Опубликовать базу знаний: экспорт сайта", exact: true })
+    .click();
   await expect
-    .poll(() => fs.readFile(path.join(output, "index.html"), "utf8").catch(() => null))
+    .poll(
+      async () => {
+        const failure = (await page.locator(".toast.error").count())
+          ? await page.locator(".toast.error").textContent()
+          : null;
+        if (failure) throw Error(failure);
+        return fs.readFile(path.join(output, "index.html"), "utf8").catch(() => null);
+      },
+      { timeout: 15000 },
+    )
     .toContain("Начало");
   expect(await fs.readFile(path.join(output, "notes", "Начало.html"), "utf8")).toContain(
     "%D0%92%D1%82%D0%BE%D1%80%D0%B0%D1%8F.html",
@@ -192,7 +203,8 @@ test("импорт структуры папки, относительные в�
     },
     [source, destination],
   );
-  await page.getByRole("button", { name: "Импорт из папки", exact: true }).click();
+  await page.locator(".vault-switch").click();
+  await page.getByRole("button", { name: "Импорт из папки…", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Импорт завершён" })).toBeVisible();
   await page.getByRole("button", { name: "Понятно", exact: true }).click();
   await page.locator(".tree-file").filter({ hasText: "Пример" }).click();
@@ -296,7 +308,8 @@ test("редактирование, перезапуск, поиск, чтени
   expect(errors).toEqual([]);
 });
 test("создание холста, изменение карточки и сохранение JSON Canvas", async () => {
-  await page.getByRole("button", { name: "Новый холст", exact: true }).click();
+  await page.getByRole("button", { name: "Создать файл", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Новый холст", exact: true }).click();
   await page.getByPlaceholder("Папка/Название").fill("Мои идеи");
   await page.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(page.locator(".canvas-view")).toBeVisible();
@@ -337,7 +350,8 @@ test("новая заметка, свойства, закладка, истор�
   await application.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(940, 680),
   );
-  await page.getByRole("button", { name: "Новая заметка", exact: true }).click();
+  await page.getByRole("button", { name: "Создать файл", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Новая заметка/ }).click();
   await page.getByPlaceholder("Папка/Название").fill("Работа/Новая");
   await page.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(page.locator(".tab.active")).toContainText("Новая");
@@ -419,11 +433,12 @@ test("главная и коллекции сохраняют открытые �
   await page.keyboard.press(`${modifier}+End`);
   await page.keyboard.type(" Правка перед переходом на главную.");
   await page.getByRole("button", { name: "Главная", exact: true }).click();
-  await expect(page.locator(".workspace-home h1")).toContainText("vault");
+  await expect(page.locator(".workspace-home h1")).toContainText("Главная");
   await expect(page.locator(".tab")).toHaveCount(1);
-  await page.getByRole("button", { name: "Открыть холсты", exact: true }).click();
+  await page.getByRole("button", { name: "Фильтр файлов", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "Холсты", exact: true }).click();
   await expect(page.locator(".collection-heading h1")).toHaveText("Холсты");
-  await expect(page.locator(".collection-card")).toHaveCount(1);
+  await expect(page.locator(".collection-row")).toHaveCount(1);
   await page
     .getByRole("textbox", { name: "Найти среди файлов", exact: true })
     .fill("нет такого файла");
@@ -431,7 +446,7 @@ test("главная и коллекции сохраняют открытые �
   await page
     .getByRole("textbox", { name: "Найти среди файлов", exact: true })
     .fill("План");
-  await page.locator(".collection-card").click();
+  await page.locator(".collection-row").click();
   await expect(page.locator(".canvas-view")).toBeVisible();
   await page.locator('.tab-open[title="Начало.md"]').click();
   await expect(page.locator(".cm-content")).toContainText(
@@ -449,14 +464,20 @@ test("в компактном окне навигация и режимы дос
     BrowserWindow.getAllWindows()[0].setSize(940, 680),
   );
   await expect(page.locator(".inspector")).toHaveCount(0);
-  for (const name of ["Редактор", "Исходный код", "Чтение", "Редактор и предпросмотр"]) {
-    const button = page.getByRole("button", { name, exact: true });
-    await expect(button).toBeVisible();
-    const box = await button.boundingBox();
-    const width = await page.evaluate(() => window.innerWidth);
-    expect(box!.x).toBeGreaterThan(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
-  }
+  const reading = page.getByRole("button", { name: "Чтение", exact: true });
+  await expect(reading).toBeVisible();
+  const box = await reading.boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(
+    await page.evaluate(() => window.innerWidth),
+  );
+  await page.getByRole("button", { name: "Действия с документом", exact: true }).click();
+  await page.getByRole("button", { name: "Редактор: исходный код", exact: true }).click();
+  await expect(page.locator(".source-editor")).toBeVisible();
+  await page.getByRole("button", { name: "Действия с документом", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Редактор и предпросмотр рядом", exact: true })
+    .click();
+  await expect(page.locator(".mode-split")).toBeVisible();
   await page.locator(".panel-toggle").click();
   await expect(page.locator(".inspector")).toBeVisible();
   await page.getByRole("button", { name: "Закрыть панель", exact: true }).click();
@@ -504,8 +525,7 @@ test("системная тема реагирует без перезапуск
     0,
   );
   await expect(settings).toBeFocused();
-  const commands = page.getByRole("button", { name: "Палитра команд", exact: true });
-  await commands.click();
+  await page.keyboard.press(`${modifier}+p`);
   await page.getByPlaceholder("Найти команду…").fill("Настройки");
   await page.keyboard.press("Enter");
   await expect(
@@ -513,4 +533,49 @@ test("системная тема реагирует без перезапуск
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".overlay")).toHaveCount(0);
+});
+
+test("⌘/Ctrl E переключает правку и чтение, текст начинается в верхних 100 px", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await expect(page.locator(".cm-content")).toBeVisible();
+  await page.keyboard.press(`${modifier}+e`);
+  await expect(page.locator(".reading-pane h1")).toHaveText("Начало");
+  expect((await page.locator(".reading-pane h1").boundingBox())!.y).toBeLessThanOrEqual(
+    100,
+  );
+  expect(
+    (await page.locator(".document-toolbar").boundingBox())!.height,
+  ).toBeLessThanOrEqual(40);
+  await page.keyboard.press(`${modifier}+e`);
+  await expect(page.locator(".cm-content")).toContainText("Текст заметки");
+  await page.keyboard.press(`${modifier}+o`);
+  await expect(page.getByPlaceholder("Перейти к файлу…")).toBeFocused();
+});
+
+test("запуск с главной сохраняет вкладки и настройку шрифта", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.getByRole("button", { name: "Настройки", exact: true }).click();
+  await page.getByLabel("При запуске открывать").selectOption("home");
+  await expect
+    .poll(
+      async () =>
+        JSON.parse(
+          await fs.readFile(path.join(root, ".veltrite/preferences.json"), "utf8"),
+        ).startupView,
+    )
+    .toBe("home");
+  await page.getByLabel("Шрифт текста", { exact: true }).selectOption("sans");
+  await expect(page.locator("html")).toHaveAttribute("data-text-font", "sans");
+  await page.getByRole("button", { name: "Закрыть настройки", exact: true }).click();
+  await page.keyboard.press(`${modifier}+s`);
+  await expect
+    .poll(async () => (await page.evaluate(() => window.veltrite.state())).session?.tabs)
+    .toContain("Начало.md");
+  await application.close();
+  await launch();
+  await expect(page.locator(".workspace-home")).toBeVisible();
+  await expect(page.locator(".tab")).toHaveCount(1);
+  await page.locator(".tab-open").click();
+  await expect(page.locator(".cm-content")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-text-font", "sans");
 });

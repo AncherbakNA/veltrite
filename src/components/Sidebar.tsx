@@ -2,7 +2,6 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronRight,
-  Command,
   Ellipsis,
   FileText,
   Folder,
@@ -10,14 +9,12 @@ import {
   GitBranch,
   Hash,
   House,
-  Import,
-  Mic,
+  ListFilter,
   PanelsTopLeft,
   Paperclip,
   Plus,
   Search,
   Settings,
-  Square,
   Star,
   Table2,
   X,
@@ -40,7 +37,6 @@ interface SidebarProps {
   view: "home" | "graph" | "document" | "collection";
   filter: FileFilter;
   setFilter: (filter: FileFilter) => void;
-  recording: boolean;
 }
 const sections = [
   ["files", Folder, "Файлы"],
@@ -49,6 +45,8 @@ const sections = [
   ["tags", Hash, "Теги"],
 ] as const;
 const creationActions = [
+  ["new-note", FileText, "Новая заметка"],
+  ["new-canvas", PanelsTopLeft, "Новый холст"],
   ["new-base", Table2, "Новая база"],
   ["new-folder", FolderPlus, "Новая папка"],
 ] as const;
@@ -71,7 +69,6 @@ export default function Sidebar({
   view,
   filter,
   setFilter,
-  recording,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -80,6 +77,7 @@ export default function Sidebar({
   const [searchError, setSearchError] = useState("");
   const [context, setContext] = useState<string | null>(null);
   const [createMenu, setCreateMenu] = useState(false);
+  const [filterMenu, setFilterMenu] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const tags = [...new Set(index.flatMap((note) => note.tags))].sort((a, b) =>
     a.localeCompare(b, "ru"),
@@ -105,17 +103,19 @@ export default function Sidebar({
       if (
         !(event.target instanceof Element) ||
         !event.target.closest(
-          ".file-context, .tree-more, .create-menu, .create-menu-toggle",
+          ".file-context, .tree-more, .create-menu, .create-menu-toggle, .file-filter-menu, .filter-menu-toggle",
         )
       ) {
         setContext(null);
         setCreateMenu(false);
+        setFilterMenu(false);
       }
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setContext(null);
         setCreateMenu(false);
+        setFilterMenu(false);
       }
     };
     document.addEventListener("pointerdown", dismiss);
@@ -164,64 +164,47 @@ export default function Sidebar({
 
   return (
     <aside className="sidebar" aria-label="Навигация по хранилищу">
-      <button
-        className="vault-switch"
-        onClick={() => onAction("vault-menu")}
-        title="Сменить хранилище"
-      >
-        <span className="vault-avatar">{vault.name.slice(0, 1).toUpperCase()}</span>
-        <span>
-          <small>Хранилище</small>
+      <div className="sidebar-top">
+        <button
+          className="vault-switch"
+          onClick={() => onAction("vault-menu")}
+          title="Сменить хранилище"
+          aria-label={"Хранилище: " + vault.name}
+        >
           <strong>{vault.name}</strong>
-        </span>
-        <ChevronDown size={15} />
-      </button>
-      <div className="sidebar-create">
-        <button
-          className="primary"
-          aria-label="Новая заметка"
-          onClick={() => onAction("new-note")}
-        >
-          <Plus size={17} />
-          <span>Заметка</span>
-          <kbd>{primaryKey} N</kbd>
+          <ChevronDown size={16} />
         </button>
-        <button
-          className="new-canvas-shortcut"
-          title="Новый холст"
-          aria-label="Новый холст"
-          onClick={() => onAction("new-canvas")}
-        >
-          <PanelsTopLeft size={16} />
-          <span>Холст</span>
-        </button>
-        <button
-          className="create-menu-toggle"
-          aria-label="Другие способы создания"
-          aria-expanded={createMenu}
-          onClick={() => setCreateMenu(!createMenu)}
-        >
-          <ChevronDown size={14} />
-        </button>
-        {createMenu && (
-          <div className="create-menu" role="menu">
-            {creationActions.map(([action, Icon, label]) => (
-              <button
-                role="menuitem"
-                key={action}
-                onClick={() => {
-                  setCreateMenu(false);
-                  onAction(action);
-                }}
-              >
-                <Icon size={16} />
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="sidebar-create">
+          <button
+            className="create-menu-toggle icon-button"
+            aria-label="Создать файл"
+            title="Создать файл"
+            aria-expanded={createMenu}
+            onClick={() => setCreateMenu(!createMenu)}
+          >
+            <Plus size={16} />
+          </button>
+          {createMenu && (
+            <div className="create-menu" role="menu" aria-label="Создать файл">
+              {creationActions.map(([action, Icon, label]) => (
+                <button
+                  role="menuitem"
+                  key={action}
+                  onClick={() => {
+                    setCreateMenu(false);
+                    onAction(action);
+                  }}
+                >
+                  <Icon size={16} />
+                  {label}
+                  {action === "new-note" && <kbd>{primaryKey}N</kbd>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-      <nav className="workspace-nav" aria-label="Разделы пространства">
+      <nav className="workspace-nav" aria-label="Разделы хранилища">
         <button
           className={view === "home" ? "active" : ""}
           aria-current={view === "home" ? "page" : undefined}
@@ -238,28 +221,23 @@ export default function Sidebar({
         >
           <GitBranch size={17} />
           <span>Граф знаний</span>
-          <span className="nav-detail">связи</span>
         </button>
         <button title="Ежедневная заметка" onClick={() => onAction("daily")}>
           <CalendarDays size={17} />
           <span>Сегодня</span>
-          <span className="nav-detail">дневник</span>
         </button>
       </nav>
-      <div className="sidebar-library-label">
-        ХРАНИЛИЩЕ<span>{fileCount}</span>
-      </div>
       <div className="sidebar-tabs" role="group" aria-label="Инструменты хранилища">
         {sections.map(([id, Icon, label]) => (
           <button
             key={id}
             className={section === id ? "active" : ""}
             title={label}
+            aria-label={label}
             aria-pressed={section === id}
             onClick={() => setSection(id)}
           >
             <Icon size={15} />
-            <span>{label}</span>
           </button>
         ))}
       </div>
@@ -268,38 +246,48 @@ export default function Sidebar({
           {
             (
               {
-                files: "Все файлы",
+                files: filters.find(([kind]) => kind === filter)?.[1] || "Файлы",
                 search: "Поиск по содержимому",
-                bookmarks: "Ваши закладки",
-                tags: "Все теги",
+                bookmarks: "Закладки",
+                tags: "Теги",
               } as Record<string, string>
             )[section]
           }
         </span>
         {section === "files" && (
-          <button
-            title="Новая папка"
-            aria-label="Новая папка"
-            onClick={() => onAction("new-folder")}
-          >
-            <FolderPlus size={15} />
-          </button>
+          <div className="file-filter-control">
+            <span className="count">{fileCount}</span>
+            <button
+              className={
+                "filter-menu-toggle icon-button " + (filter !== "all" ? "active" : "")
+              }
+              title="Фильтр файлов"
+              aria-label="Фильтр файлов"
+              aria-expanded={filterMenu}
+              onClick={() => setFilterMenu(!filterMenu)}
+            >
+              <ListFilter size={16} />
+            </button>
+            {filterMenu && (
+              <div className="file-filter-menu" role="menu" aria-label="Тип файлов">
+                {filters.map(([kind, label]) => (
+                  <button
+                    key={kind}
+                    role="menuitemradio"
+                    aria-checked={filter === kind}
+                    onClick={() => {
+                      setFilter(kind);
+                      setFilterMenu(false);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
-      {section === "files" && (
-        <div className="file-filters" role="group" aria-label="Тип файлов">
-          {filters.map(([kind, label]) => (
-            <button
-              key={kind}
-              aria-pressed={filter === kind}
-              className={filter === kind ? "active" : ""}
-              onClick={() => setFilter(kind)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
       <div className="sidebar-scroll">
         {section === "files" && (
           <>
@@ -533,31 +521,10 @@ export default function Sidebar({
           ))}
       </div>
       <div className="sidebar-bottom">
-        <button className="sidebar-import" onClick={() => onAction("import")}>
-          <Import size={15} />
-          <span>Импорт из папки</span>
+        <button onClick={() => onAction("settings")} aria-label="Настройки">
+          <Settings size={16} />
+          <span>Настройки</span>
         </button>
-        <div className="sidebar-utilities">
-          <button onClick={() => onAction("settings")} aria-label="Настройки">
-            <Settings size={16} />
-            <span>Настройки</span>
-          </button>
-          <button
-            title="Все команды"
-            aria-label="Все команды"
-            onClick={() => onAction("commands")}
-          >
-            <Command size={16} />
-          </button>
-          <button
-            title={recording ? "Остановить запись" : "Записать аудио"}
-            aria-label={recording ? "Остановить запись" : "Записать аудио"}
-            className={recording ? "recording" : ""}
-            onClick={() => onAction("record")}
-          >
-            {recording ? <Square size={15} /> : <Mic size={16} />}
-          </button>
-        </div>
       </div>
     </aside>
   );
