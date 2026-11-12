@@ -1925,3 +1925,15 @@ h3,
   padding: 6px;
   max-height: 60px;
 }
+.plugin-review {
+  padding: 16px;
+  margin-top: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+}
+.plugin-review ul {
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.8;
+}

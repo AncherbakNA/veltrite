@@ -47,6 +47,9 @@ const methods = [
   "plugins",
   "installPlugin",
   "togglePlugin",
+  "removePlugin",
+  "executePlugin",
+  "updatePluginContext",
   "workspaceSave",
   "saveSession",
   "workspaces",
@@ -62,6 +65,8 @@ function subscribe(channel: string, callback: (...args: any[]) => void) {
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 }
+api.onPluginAction = (callback: any) => subscribe("plugins:action", callback);
+api.onPluginsChanged = (callback: any) => subscribe("plugins:changed", callback);
 api.onChange = (callback: any) => subscribe("vault:changed", callback);
 api.onMenu = (callback: any) => subscribe("app:menu", callback);
 api.closeReady = () => ipcRenderer.send("veltrite:close-ready");

@@ -61,6 +61,15 @@ async function bundle() {
     external: ["electron"],
     sourcemap: false,
   });
+  await build({
+    entryPoints: ["electron/plugin-preload.ts"],
+    outfile: "dist-electron/plugin-preload.cjs",
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    external: ["electron"],
+    sourcemap: false,
+  });
 }
 if (task === "check") run("node_modules/typescript/lib/tsc.js", ["--noEmit"]);
 else if (task === "test") {

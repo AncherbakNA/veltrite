@@ -863,3 +863,139 @@ test("граф отображает более 500 заметок, дерево 
   await expect(page.locator(".tree-row.active")).toContainText("n1599");
   expect(await page.locator(".tree-file").count()).toBeLessThan(100);
 });
+
+async function installScript(id: string, permissions: string[], code: string) {
+  const folder = path.join(temp, "extension-" + id);
+  await fs.mkdir(folder);
+  const manifest = path.join(folder, "manifest.json");
+  await fs.writeFile(
+    manifest,
+    JSON.stringify({
+      id,
+      name: "Тест " + id,
+      description: "Синтетическое расширение",
+      version: "1.0.0",
+      apiVersion: 1,
+      main: "main.js",
+      permissions,
+      commands: [{ id: "run", name: "Выполнить" }],
+    }),
+  );
+  await fs.writeFile(path.join(folder, "main.js"), code);
+  await application.evaluate(({ dialog }, file) => {
+    (dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+  }, manifest);
+  await page.evaluate(() => window.veltrite.installPlugin());
+}
+test("JavaScript-расширение запрашивает разрешения и работает без Node и доступа к API окна", async () => {
+  const permissions = ["vault.read", "vault.write", "editor.write", "storage"];
+  await installScript(
+    "sandbox",
+    permissions,
+    `export default async api=>{
+    await api.commands.register("run",async()=>{
+      let escaped=false, metadata=false;
+      try{await api.vault.read("../outside.txt");escaped=true;}catch{}
+      try{await api.vault.read(".veltrite/vault.json");metadata=true;}catch{}
+      await api.vault.create("Из расширения.md",JSON.stringify({node:typeof require,process:typeof process,bridge:typeof window.veltrite,escaped,metadata}));
+      await api.editor.replaceSelection("ВСТАВКА ИЗ РАСШИРЕНИЯ");
+    });
+    api.onUnload(()=>api.storage.set("disposed",true));
+  };`,
+  );
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.keyboard.press(`${modifier}+,`);
+  await page.getByRole("button", { name: "Расширения", exact: true }).click();
+  await page.getByRole("switch", { name: "Тест sandbox · 1.0.0" }).click();
+  await expect(
+    page.getByRole("alertdialog", { name: "Разрешения расширения" }),
+  ).toContainText("Читать файлы хранилища");
+  await page.getByRole("button", { name: "Разрешить и включить", exact: true }).click();
+  await expect(page.getByRole("switch", { name: "Тест sandbox · 1.0.0" })).toBeChecked();
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.veltrite.executePlugin("sandbox", "run"));
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Начало.md"), "utf8"))
+    .toContain("ВСТАВКА ИЗ РАСШИРЕНИЯ");
+  expect(
+    JSON.parse(await fs.readFile(path.join(root, "Из расширения.md"), "utf8")),
+  ).toEqual({
+    node: "undefined",
+    process: "undefined",
+    bridge: "undefined",
+    escaped: false,
+    metadata: false,
+  });
+  await page.evaluate(() => window.veltrite.togglePlugin("sandbox", false));
+  expect(
+    JSON.parse(
+      await fs.readFile(
+        path.join(temp, "profile", "plugins", "data", "sandbox.json"),
+        "utf8",
+      ),
+    ),
+  ).toEqual({ disposed: true });
+  await expect
+    .poll(() =>
+      application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
+    )
+    .toBe(1);
+});
+test("расширение без разрешения не читает заметки", async () => {
+  await installScript(
+    "denied",
+    ["notice"],
+    `export default async api=>{await api.commands.register("run",async()=>{try{await api.vault.read("Начало.md");await api.notice("UNEXPECTED");}catch(error){await api.notice(error.message);}});};`,
+  );
+  await page.evaluate(() => window.veltrite.togglePlugin("denied", true, ["notice"]));
+  await page.evaluate(() => window.veltrite.executePlugin("denied", "run"));
+  await expect(page.locator(".toast")).toContainText("Нет разрешения: vault.read");
+});
+test("зависшая команда отключает только своё расширение", async () => {
+  await installScript(
+    "hang",
+    [],
+    `export default async api=>{await api.commands.register("run",()=>{while(true){}});};`,
+  );
+  await page.evaluate(() => window.veltrite.togglePlugin("hang", true, []));
+  const command = page.evaluate(() =>
+    window.veltrite.executePlugin("hang", "run").catch((error) => error.message),
+  );
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await expect(page.locator(".cm-content")).toContainText("Начало");
+  expect(await command).toContain("время ожидания");
+  expect(
+    (await page.evaluate(() => window.veltrite.plugins())).find(
+      (plugin) => plugin.id === "hang",
+    )?.enabled,
+  ).toBe(false);
+  await expect
+    .poll(() =>
+      application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
+    )
+    .toBe(1);
+});
+
+test("расширение не перезаписывает файл по устаревшей ревизии", async () => {
+  await installScript(
+    "revision",
+    ["vault.read", "vault.write", "notice"],
+    `export default async api=>{await api.commands.register("run",async()=>{const note=await api.vault.read("Начало.md");await api.notice("ГОТОВ К ЗАПИСИ");await new Promise(resolve=>setTimeout(resolve,600));await api.vault.write(note.path,"ПРАВКА ПЛАГИНА",note.revision);});};`,
+  );
+  await page.evaluate(() =>
+    window.veltrite.togglePlugin("revision", true, [
+      "vault.read",
+      "vault.write",
+      "notice",
+    ]),
+  );
+  const command = page.evaluate(() =>
+    window.veltrite.executePlugin("revision", "run").catch((error) => error.message),
+  );
+  await expect(page.locator(".toast")).toContainText("ГОТОВ К ЗАПИСИ");
+  await fs.writeFile(path.join(root, "Начало.md"), "# Более свежая правка");
+  expect(await command).toContain("другой программой");
+  expect(await fs.readFile(path.join(root, "Начало.md"), "utf8")).toBe(
+    "# Более свежая правка",
+  );
+});

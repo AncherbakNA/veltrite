@@ -186,6 +186,52 @@ export default function App() {
       draft.content + (draft.content.endsWith("\n") ? "" : "\n") + text,
     );
   };
+  useEffect(
+    () =>
+      api().onPluginAction((action) => {
+        if (action.type === "notice") {
+          message(action.text);
+          return;
+        }
+        const draft = currentRef.current;
+        if (!draft || !/\.md$/i.test(draft.path)) {
+          error("Откройте текстовую заметку");
+          return;
+        }
+        if (action.type === "append") {
+          workspace.edit(draft.path, draft.content + action.text);
+          return;
+        }
+        workspace.setPaneMode("live");
+        setTimeout(
+          () =>
+            window.dispatchEvent(
+              new CustomEvent("veltrite:insert", {
+                detail: {
+                  path: draft.path,
+                  paneId: workspace.activePane,
+                  text: action.text,
+                },
+              }),
+            ),
+          60,
+        );
+      }),
+    [message, error, workspace.edit, workspace.activePane],
+  );
+  useEffect(() => {
+    setSelection("");
+  }, [active, workspace.activePane]);
+  useEffect(() => {
+    void api()
+      .updatePluginContext({
+        path: current?.path || null,
+        content: (current?.content || "").slice(0, 1024 * 1024),
+        selection: selection.slice(0, 1024 * 1024),
+        paneId: workspace.activePane,
+      })
+      .catch(() => {});
+  }, [current?.path, current?.content, selection, workspace.activePane]);
   const newFile = (kind: "note" | "canvas" | "base", initial?: string) => {
     const extension = kind === "canvas" ? ".canvas" : kind === "base" ? ".base" : ".md";
     setDialog({
@@ -461,6 +507,7 @@ export default function App() {
         id: p.id + ":" + c.id,
         name: p.name + ": " + c.name,
         run: () => {
+          if (c.action === "execute") run(() => api().executePlugin(p.id, c.id));
           if (c.action === "insert") insert(c.value || "");
           if (c.action === "open-url") run(() => api().openExternal(c.value || ""));
           if (c.action === "create") newFile("note", c.value);
@@ -468,10 +515,14 @@ export default function App() {
       })),
     );
   useEffect(() => {
-    api()
-      .plugins()
-      .then(setInstalledPlugins)
-      .catch(() => {});
+    const refresh = () =>
+      api()
+        .plugins()
+        .then(setInstalledPlugins)
+        .catch(() => {});
+    void refresh();
+    const off = api().onPluginsChanged(refresh);
+    return off;
   }, [settings]);
   actionRef.current = (action: string) => {
     if (action === "home") {

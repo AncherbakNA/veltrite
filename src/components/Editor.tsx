@@ -251,6 +251,28 @@ export default function Editor({
     window.addEventListener("veltrite:goto", goto);
     return () => window.removeEventListener("veltrite:goto", goto);
   }, []);
+  useEffect(() => {
+    const insert = (event: Event) => {
+      const editor = view.current,
+        detail = (event as CustomEvent).detail;
+      if (
+        !editor ||
+        detail?.path !== previewData.current.path ||
+        detail.paneId !== paneId ||
+        typeof detail.text !== "string"
+      )
+        return;
+      const { from, to } = editor.state.selection.main;
+      editor.dispatch({
+        changes: { from, to, insert: detail.text },
+        selection: { anchor: from + detail.text.length },
+        scrollIntoView: true,
+      });
+      editor.focus();
+    };
+    window.addEventListener("veltrite:insert", insert);
+    return () => window.removeEventListener("veltrite:insert", insert);
+  }, []);
   return (
     <div
       className={"editor-host " + (live ? "live-editor" : "source-editor")}

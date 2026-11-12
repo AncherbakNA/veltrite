@@ -13,6 +13,7 @@ import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { EditorContext, PluginPermission } from "../shared/extensions";
 import { normalizeSession, type WorkspaceSession } from "../shared/panes";
 import type { Preferences, SyncStatus } from "../shared/types";
 import { ConfigStore } from "./config";
@@ -21,6 +22,7 @@ import { exportSite, type StaticPage } from "./export-site";
 import { beginDeviceLogin, finishDeviceLogin, GitHub } from "./github";
 import { importFolder } from "./importer";
 import { safePath } from "./paths";
+import { pluginPreload, PluginRuntime } from "./plugin-runtime";
 import { Plugins } from "./plugins";
 import { synchronize, type SyncCheckpoint } from "./sync";
 import { atomicWrite, hash, MAX_FILE, Serial, Vault } from "./vault";
@@ -34,6 +36,10 @@ if (testMode) {
   app.setPath("userData", process.env.VELTRITE_TEST_DATA);
 }
 protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "veltrite-plugin",
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
   {
     scheme: "veltrite-map",
     privileges: { standard: true, secure: true, supportFetchAPI: true },
@@ -52,6 +58,13 @@ app.setName("Veltrite");
 if (process.platform === "win32") app.setAppUserModelId("app.veltrite.desktop");
 let mainWindow: BrowserWindow;
 let webCards: WebCards;
+let pluginRuntime: PluginRuntime | null = null;
+let editorContext: EditorContext = {
+  path: null,
+  content: "",
+  selection: "",
+  paneId: "main",
+};
 let vault: Vault | null = null;
 let watcher: FSWatcher | null = null;
 let changeTimer: NodeJS.Timeout | null = null;
@@ -101,9 +114,11 @@ async function status(): Promise<SyncStatus> {
   };
 }
 function notify() {
+  pluginRuntime?.emit("vault:changed", null);
   if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("vault:changed");
 }
 async function openVault(root: string) {
+  editorContext = { path: null, content: "", selection: "", paneId: "main" };
   const next = new Vault(root, path.join(__dirname, "search-worker.cjs"));
   await next.open();
   vault = next;
@@ -588,12 +603,53 @@ const methods: Record<string, (...args: any[]) => any> = {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Установить расширение Veltrite",
       properties: ["openFile"],
-      filters: [{ name: "Манифест Veltrite", extensions: ["json"] }],
+      filters: [{ name: "Манифест Veltrite (manifest.json)", extensions: ["json"] }],
     });
     if (result.canceled) return null;
-    return plugins.install(result.filePaths[0]);
+    const plugin = await plugins.install(result.filePaths[0]);
+    await pluginRuntime?.stop(plugin.id);
+    mainWindow.webContents.send("plugins:changed");
+    return plugin;
   },
-  togglePlugin: (id: string, enabled: boolean) => plugins.toggle(id, enabled),
+  togglePlugin: async (id: string, enabled: boolean, grants: PluginPermission[] = []) => {
+    if (!enabled) await pluginRuntime?.stop(id);
+    const plugin = await plugins.toggle(id, enabled, grants);
+    if (enabled && plugin.main)
+      try {
+        await pluginRuntime?.start(plugin);
+      } catch (error: any) {
+        await plugins.fail(id, error.message);
+        throw error;
+      }
+    mainWindow.webContents.send("plugins:changed");
+  },
+  removePlugin: async (id: string) => {
+    await pluginRuntime?.stop(id);
+    await plugins.remove(id);
+    mainWindow.webContents.send("plugins:changed");
+  },
+  executePlugin: (id: string, command: string) => pluginRuntime?.execute(id, command),
+  updatePluginContext: (context: EditorContext) => {
+    if (
+      !context ||
+      (context.path !== null &&
+        (typeof context.path !== "string" || context.path.length > 2048)) ||
+      typeof context.content !== "string" ||
+      context.content.length > 1024 * 1024 ||
+      typeof context.selection !== "string" ||
+      context.selection.length > 1024 * 1024 ||
+      typeof context.paneId !== "string" ||
+      context.paneId.length > 80
+    )
+      throw Error("Некорректный контекст редактора");
+    editorContext = {
+      path: context.path,
+      content: context.content,
+      selection: context.selection,
+      paneId: context.paneId,
+    };
+    pluginRuntime?.emit("editor:changed", editorContext);
+  },
   workspaceSave: async (name: string, data: WorkspaceSession) => {
     if (
       typeof name !== "string" ||
@@ -625,6 +681,13 @@ const methods: Record<string, (...args: any[]) => any> = {
   workspaces: () => store.readLocal("workspaces-" + secretId(), []),
 };
 function setupIpc() {
+  ipcMain.handle("veltrite-plugin:invoke", (event, method, args) => {
+    if (!pluginRuntime) throw Error("Расширения ещё не запущены");
+    return pluginRuntime.invoke(event, method, args);
+  });
+  ipcMain.on("veltrite-plugin:reply", (event, id, error) =>
+    pluginRuntime?.reply(event, id, error),
+  );
   for (const [name, handler] of Object.entries(methods))
     ipcMain.handle("veltrite:" + name, async (event, ...args) => {
       if (
@@ -661,6 +724,23 @@ async function createWindow() {
     },
   });
   webCards = new WebCards(mainWindow);
+  pluginRuntime = new PluginRuntime(
+    plugins,
+    {
+      vault: needVault,
+      serial,
+      changed: notify,
+      context: () => editorContext,
+      action: (action) => mainWindow.webContents.send("plugins:action", action),
+      pluginsChanged: () => {
+        if (!mainWindow.isDestroyed()) mainWindow.webContents.send("plugins:changed");
+      },
+    },
+    pluginPreload(__dirname),
+  );
+  mainWindow.once("closed", () => {
+    void pluginRuntime?.close();
+  });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!url.startsWith(pathToFileURL(path.join(__dirname, "../dist/")).href))
@@ -677,6 +757,7 @@ async function createWindow() {
       origin.startsWith("file://"),
   );
   await mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+  void pluginRuntime.startEnabled().catch(() => {});
   mainWindow.on("close", (event) => {
     if (testMode) return;
     event.preventDefault();

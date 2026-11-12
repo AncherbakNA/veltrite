@@ -1,0 +1,10 @@
+{
+  "id": "outline",
+  "name": "Содержание в заметке",
+  "description": "Вставляет список заголовков открытой заметки.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "main": "main.js",
+  "permissions": ["editor.read", "editor.write", "notice"],
+  "commands": [{ "id": "insert", "name": "Вставить содержание" }]
+}

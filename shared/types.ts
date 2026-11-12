@@ -1,3 +1,4 @@
+import type { EditorContext, PluginAction, PluginPermission } from "./extensions";
 import type { WorkspaceSession } from "./panes";
 export type Theme = "dark" | "light" | "system";
 export interface Preferences {
@@ -168,6 +169,11 @@ export interface ImportResult {
   vault: VaultInfo;
 }
 export interface PluginInfo {
+  main?: "main.js";
+  apiVersion?: 1;
+  permissions?: PluginPermission[];
+  grants?: PluginPermission[];
+  error?: string;
   id: string;
   name: string;
   description: string;
@@ -245,7 +251,12 @@ export interface VeltriteAPI {
   webCardClose(id: string): Promise<void>;
   plugins(): Promise<PluginInfo[]>;
   installPlugin(): Promise<PluginInfo | null>;
-  togglePlugin(id: string, enabled: boolean): Promise<void>;
+  togglePlugin(id: string, enabled: boolean, grants?: PluginPermission[]): Promise<void>;
+  removePlugin(id: string): Promise<void>;
+  executePlugin(id: string, command: string): Promise<void>;
+  updatePluginContext(context: EditorContext): Promise<void>;
+  onPluginAction(callback: (action: PluginAction) => void): () => void;
+  onPluginsChanged(callback: () => void): () => void;
   workspaceSave(name: string, data: WorkspaceSession): Promise<void>;
   saveSession(data: WorkspaceSession): Promise<void>;
   workspaces(): Promise<(WorkspaceSession & { name: string })[]>;

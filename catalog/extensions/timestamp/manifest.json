@@ -1,0 +1,10 @@
+{
+  "id": "timestamp",
+  "name": "Дата и время",
+  "description": "Вставляет текущую дату и время в место курсора.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "main": "main.js",
+  "permissions": ["editor.write"],
+  "commands": [{ "id": "insert", "name": "Вставить дату и время" }]
+}

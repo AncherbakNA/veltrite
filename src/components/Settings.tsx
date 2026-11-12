@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
+import { permissionLabels } from "../../shared/extensions";
 import type { PluginInfo, Preferences, SyncStatus } from "../../shared/types";
 import { useDialogFocus } from "../useDialogFocus";
 import { api } from "../useVault";
@@ -47,7 +48,8 @@ export default function Settings({
     [keySaved, setKeySaved] = useState(sync.recoverySaved),
     [busy, setBusy] = useState(false),
     [device, setDevice] = useState(""),
-    [plugins, setPlugins] = useState<PluginInfo[]>([]);
+    [plugins, setPlugins] = useState<PluginInfo[]>([]),
+    [pluginReview, setPluginReview] = useState<PluginInfo | null>(null);
   const dialog = useDialogFocus<HTMLDivElement>();
   useEffect(() => setSelectedTheme(preferences.theme), [preferences.theme]);
   useEffect(() => {
@@ -545,8 +547,7 @@ export default function Settings({
             <>
               <h2>Расширения</h2>
               <p className="muted">
-                Команды Veltrite из JSON-манифестов. JavaScript-расширения не
-                поддерживаются.
+                Команды из JSON и JavaScript-расширения с отдельными разрешениями.
               </p>
               <button
                 onClick={() =>
@@ -566,16 +567,61 @@ export default function Settings({
                 <Toggle
                   key={plugin.id}
                   label={`${plugin.name} · ${plugin.version}`}
-                  description={plugin.description}
+                  description={
+                    plugin.description + (plugin.error ? " · " + plugin.error : "")
+                  }
                   checked={plugin.enabled}
-                  onChange={(enabled) =>
-                    run(async () => {
+                  onChange={(enabled) => {
+                    if (enabled && plugin.main) {
+                      setPluginReview(plugin);
+                      return;
+                    }
+                    void run(async () => {
                       await api().togglePlugin(plugin.id, enabled);
                       setPlugins(await api().plugins());
-                    })
-                  }
+                    });
+                  }}
                 />
               ))}
+              {pluginReview && (
+                <div
+                  className="plugin-review"
+                  role="alertdialog"
+                  aria-label="Разрешения расширения"
+                >
+                  <h3>Включить {pluginReview.name}?</h3>
+                  <p>Расширение получит доступ:</p>
+                  {pluginReview.permissions?.length ? (
+                    <ul>
+                      {pluginReview.permissions.map((permission) => (
+                        <li key={permission}>{permissionLabels[permission]}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>Дополнительные разрешения не запрашиваются.</p>
+                  )}
+                  <div className="button-row">
+                    <button
+                      className="primary"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          await api().togglePlugin(
+                            pluginReview.id,
+                            true,
+                            pluginReview.permissions,
+                          );
+                          setPluginReview(null);
+                          setPlugins(await api().plugins());
+                        })
+                      }
+                    >
+                      Разрешить и включить
+                    </button>
+                    <button onClick={() => setPluginReview(null)}>Отмена</button>
+                  </div>
+                </div>
+              )}
               {!plugins.length && (
                 <div className="empty-small">
                   Дополнительных расширений пока нет. Основные инструменты уже встроены.
