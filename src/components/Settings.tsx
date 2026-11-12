@@ -595,7 +595,7 @@ export default function Settings({
               </div>
               <div className="setting-row">
                 <div>
-                  <strong>Версия 0.2.0</strong>
+                  <strong>Версия 0.2.1</strong>
                   <small>macOS · Windows</small>
                 </div>
                 <button

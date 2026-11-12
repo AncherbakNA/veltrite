@@ -583,3 +583,29 @@ test("запуск с главной сохраняет вкладки и нас
   await expect(page.locator(".cm-content")).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-text-font", "sans");
 });
+
+test("системное уменьшение движения отключает плавный переход к заголовку", async () => {
+  await fs.writeFile(
+    path.join(root, "Длинная.md"),
+    "# Длинная\n\n" +
+      "Абзац для проверки прокрутки.\n\n".repeat(150) +
+      "## Раздел внизу\n\nКонец документа.",
+  );
+  await page.locator(".tree-file").filter({ hasText: "Длинная" }).click();
+  await page.getByRole("button", { name: "Чтение", exact: true }).click();
+  if (!(await page.locator(".inspector").isVisible()))
+    await page.locator(".panel-toggle").click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Раздел внизу", exact: true }).click();
+  // At the next paint the target is already in view; a smooth scroll would still be near the beginning.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  const target = await page
+    .getByRole("heading", { name: "Раздел внизу", exact: true })
+    .boundingBox();
+  expect(target!.y).toBeLessThan(await page.evaluate(() => window.innerHeight));
+  expect(
+    await page
+      .locator(".reading-toggle")
+      .evaluate((element) => getComputedStyle(element).transitionDuration),
+  ).toBe("0s");
+});

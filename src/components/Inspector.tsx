@@ -91,7 +91,13 @@ export default function Inspector({
                             if (mode === "read")
                               document
                                 .getElementById(h.text.toLowerCase().replace(/\s/g, "-"))
-                                ?.scrollIntoView({ behavior: "smooth" });
+                                ?.scrollIntoView({
+                                  behavior: window.matchMedia(
+                                    "(prefers-reduced-motion: reduce)",
+                                  ).matches
+                                    ? "auto"
+                                    : "smooth",
+                                });
                             else
                               window.dispatchEvent(
                                 new CustomEvent("veltrite:goto", {
