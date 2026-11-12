@@ -1747,3 +1747,37 @@ h3,
 .canvas-node.selected .canvas-grip {
   opacity: 1;
 }
+
+/* Rendered Markdown blocks remain editable through their source range. */
+.cm-rendered-block {
+  position: relative;
+  padding: 8px 0;
+}
+.cm-rendered-block .markdown {
+  font-size: var(--editor-size);
+}
+.cm-rendered-block .markdown > :last-child {
+  margin-bottom: 0;
+}
+.cm-rendered-block .markdown table {
+  margin: 8px 0;
+}
+.cm-block-edit {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  z-index: 1;
+  font: 12px var(--body);
+  padding: 4px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  opacity: 0;
+}
+.cm-rendered-block:hover .cm-block-edit,
+.cm-rendered-block:focus-within .cm-block-edit {
+  opacity: 1;
+}
+.cm-wiki-link a {
+  color: var(--accent-ink);
+  text-decoration: none;
+}

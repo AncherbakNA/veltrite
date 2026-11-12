@@ -4,9 +4,11 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { frontmatter, resolveLink } from "../../shared/markdown";
+import { noteFragment } from "../../shared/markdown-blocks";
 import type { NoteIndex } from "../../shared/types";
 import { api } from "../useVault";
 import { VaultFilesContext } from "../VaultContext";
+import { markdownAnchors } from "./markdownAnchors";
 import NoteLink from "./NoteLink";
 export const assetUrl = (path: string) =>
   "veltrite-asset://vault/" + path.split("/").map(encodeURIComponent).join("/");
@@ -120,7 +122,7 @@ function Embedded({
         <button onClick={() => onLink(target)}>{resolved.replace(/\.md$/i, "")}</button>
         {depth < 2 && (
           <Markdown
-            content={content}
+            content={noteFragment(content, target) ?? "Фрагмент не найден"}
             path={resolved}
             index={index}
             onLink={onLink}
@@ -162,9 +164,9 @@ export default function Markdown({
       `${prefix}**${title || ({ tip: "Совет", note: "Заметка", warning: "Внимание", info: "Информация", example: "Пример", quote: "Цитата", danger: "Осторожно", success: "Готово" } as any)[kind] || kind}**`,
   );
   return (
-    <div className="markdown">
+    <div className="markdown" data-markdown-path={path}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, wikiLinks]}
+        remarkPlugins={[remarkGfm, remarkMath, wikiLinks, markdownAnchors]}
         rehypePlugins={[rehypeKatex]}
         urlTransform={(url) =>
           url.startsWith("#vlt:") || url.startsWith("#embed:")
@@ -172,14 +174,16 @@ export default function Markdown({
             : defaultUrlTransform(url)
         }
         components={{
-          p: ({ node, children }) =>
+          p: ({ node, children, ...props }) =>
             node?.children?.some(
               (child: any) =>
                 child.tagName === "img" && child.properties?.src?.startsWith("#embed:"),
             ) ? (
-              <div className="markdown-paragraph">{children}</div>
+              <div className="markdown-paragraph" {...props}>
+                {children}
+              </div>
             ) : (
-              <p>{children}</p>
+              <p {...props}>{children}</p>
             ),
           a: ({ href, children }) => {
             if (href?.startsWith("#vlt:")) {
@@ -198,7 +202,12 @@ export default function Markdown({
                   if (href?.startsWith("#"))
                     document
                       .getElementById(href.slice(1))
-                      ?.scrollIntoView({ behavior: "smooth" });
+                      ?.scrollIntoView({
+                        behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+                          .matches
+                          ? "auto"
+                          : "smooth",
+                      });
                   else if (/^https?:/.test(href || "")) api().openExternal(href!);
                   else if (href) onLink(href);
                 }}
@@ -238,15 +247,6 @@ export default function Markdown({
                 {children}
               </code>
             ),
-          h1: ({ children }) => (
-            <h1 id={String(children).toLowerCase().replace(/\s/g, "-")}>{children}</h1>
-          ),
-          h2: ({ children }) => (
-            <h2 id={String(children).toLowerCase().replace(/\s/g, "-")}>{children}</h2>
-          ),
-          h3: ({ children }) => (
-            <h3 id={String(children).toLowerCase().replace(/\s/g, "-")}>{children}</h3>
-          ),
         }}
       >
         {source}

@@ -6,8 +6,10 @@ import { EditorView, keymap, lineNumbers, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { vim } from "@replit/codemirror-vim";
 import { minimalSetup } from "codemirror";
-import { useEffect, useRef } from "react";
-import type { Preferences } from "../../shared/types";
+import { useContext, useEffect, useRef } from "react";
+import type { NoteIndex, Preferences } from "../../shared/types";
+import { VaultFilesContext } from "../VaultContext";
+import { liveBlocks, refreshPreview, type PreviewData } from "./liveBlocks";
 import { livePreview } from "./livePreview";
 const colors = HighlightStyle.define([
   { tag: tags.heading, color: "var(--text)", fontWeight: "700" },
@@ -21,6 +23,8 @@ const colors = HighlightStyle.define([
 ]);
 export default function Editor({
   content,
+  path,
+  index,
   onChange,
   preferences,
   onLink,
@@ -29,6 +33,8 @@ export default function Editor({
   live = true,
 }: {
   content: string;
+  path: string;
+  index: NoteIndex[];
   onChange: (text: string) => void;
   preferences: Preferences;
   onLink: (target: string) => void;
@@ -45,6 +51,10 @@ export default function Editor({
     settings = useRef(new Compartment()),
     preview = useRef(new Compartment()),
     vimConfig = useRef(new Compartment());
+  const paths = useContext(VaultFilesContext);
+  const previewData = useRef<PreviewData>({ path, index, paths, onLink });
+  previewData.current = { path, index, paths, onLink };
+  const getPreviewData = () => previewData.current;
   change.current = onChange;
   const liveRef = useRef(live);
   liveRef.current = live;
@@ -64,7 +74,14 @@ export default function Editor({
           markdown({ base: markdownLanguage }),
           syntaxHighlighting(colors),
           EditorView.lineWrapping,
-          preview.current.of(live ? livePreview((target) => link.current(target)) : []),
+          preview.current.of(
+            live
+              ? [
+                  livePreview((target) => link.current(target), getPreviewData),
+                  liveBlocks(getPreviewData),
+                ]
+              : [],
+          ),
           vimConfig.current.of(preferences.vimMode ? vim() : []),
           settings.current.of(preferences.lineNumbers ? lineNumbers() : []),
           placeholder("Текст заметки…"),
@@ -189,7 +206,12 @@ export default function Editor({
   useEffect(() => {
     view.current?.dispatch({
       effects: preview.current.reconfigure(
-        live ? livePreview((target) => link.current(target)) : [],
+        live
+          ? [
+              livePreview((target) => link.current(target), getPreviewData),
+              liveBlocks(getPreviewData),
+            ]
+          : [],
       ),
     });
   }, [live]);
@@ -199,10 +221,20 @@ export default function Editor({
     });
   }, [preferences.vimMode]);
   useEffect(() => {
+    view.current?.dispatch({ effects: refreshPreview.of(undefined) });
+  }, [index]);
+  useEffect(() => {
     const goto = (event: Event) => {
       const editor = view.current;
       if (!editor) return;
-      const requested = Number((event as CustomEvent).detail);
+      const detail = (event as CustomEvent).detail;
+      if (
+        detail &&
+        typeof detail === "object" &&
+        detail.path !== previewData.current.path
+      )
+        return;
+      const requested = Number(typeof detail === "object" ? detail.line : detail);
       if (!Number.isInteger(requested)) return;
       const line = editor.state.doc.line(
         Math.max(1, Math.min(requested, editor.state.doc.lines)),

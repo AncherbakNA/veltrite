@@ -66,6 +66,7 @@ export interface NoteIndex {
   headings: { level: number; text: string; line: number }[];
   properties: Record<string, unknown>;
   words: number;
+  blocks?: { id: string; line: number }[];
 }
 export interface SyncStatus {
   recoverySaved: boolean;

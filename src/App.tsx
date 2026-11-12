@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { plural } from "../shared/format";
 import { frontmatter, indexNote, resolveLink } from "../shared/markdown";
+import { headingId, referenceBlocks } from "../shared/markdown-blocks";
 import type { HistoryItem, PluginInfo, Preferences } from "../shared/types";
 import { VaultFilesContext } from "./VaultContext";
 import { buildCommands } from "./commands";
@@ -22,6 +23,7 @@ import Sidebar, { type FileFilter } from "./components/Sidebar";
 import Welcome from "./components/Welcome";
 import WindowTabs from "./components/WindowTabs";
 import WorkspaceHome from "./components/WorkspaceHome";
+import { scrollToNoteAnchor } from "./navigation";
 import { api, useVault } from "./useVault";
 const Editor = lazy(() => import("./components/Editor"));
 const Canvas = lazy(() => import("./components/Canvas"));
@@ -223,24 +225,34 @@ export default function App() {
         const tab = tabs.find((t) => t.path === resolved),
           text = tab?.content || (await api().read(resolved)).content;
         const heading = indexNote(resolved, text).headings.find(
-          (h) => h.text.toLocaleLowerCase() === subpath.toLocaleLowerCase(),
+          (h) =>
+            h.text.toLocaleLowerCase() === subpath.toLocaleLowerCase() ||
+            headingId(h.text) === headingId(subpath),
         );
+        const block = subpath.startsWith("^")
+          ? referenceBlocks(text).find((item) => item.id === subpath.slice(1))
+          : null;
         setTimeout(() => {
-          document
-            .getElementById(
-              subpath.replace(/^\^/, "").toLocaleLowerCase().replace(/\s/g, "-"),
-            )
-            ?.scrollIntoView({ behavior: "smooth" });
-          if (heading)
+          scrollToNoteAnchor(
+            resolved,
+            subpath.startsWith("^") ? "block-" + subpath.slice(1) : headingId(subpath),
+          );
+          if (heading || block)
             window.dispatchEvent(
-              new CustomEvent("veltrite:goto", { detail: heading.line }),
+              new CustomEvent("veltrite:goto", {
+                detail: { path: resolved, line: heading?.line || block!.line },
+              }),
             );
         }, 60);
       });
     else if (target.startsWith("#"))
       document
         .getElementById(target.slice(1).toLowerCase().replace(/\s/g, "-"))
-        ?.scrollIntoView({ behavior: "smooth" });
+        ?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+        });
     else newFile("note", target.split("#")[0]);
   };
   const sync = () =>
@@ -812,6 +824,8 @@ export default function App() {
                                 <Editor
                                   key={current.path}
                                   content={current.content}
+                                  path={current.path}
+                                  index={index}
                                   onChange={(text) => workspace.edit(current.path, text)}
                                   preferences={preferences!}
                                   onLink={openLink}

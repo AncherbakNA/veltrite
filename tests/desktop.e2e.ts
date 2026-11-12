@@ -609,3 +609,51 @@ test("системное уменьшение движения отключае�
       .evaluate((element) => getComputedStyle(element).transitionDuration),
   ).toBe("0s");
 });
+
+test("живые таблицы, формулы и Mermaid редактируются без потери исходного текста", async () => {
+  const source =
+    "# Блоки\n\nВступление.\n\n| Поле | Значение |\n| --- | --- |\n| Число | 2 |\n\n$$\nx^2 + y^2\n$$\n\n```mermaid\ngraph LR\n A[Начало] --> B[Проверка]\n```\n\nКонец.\n";
+  await fs.writeFile(path.join(root, "Блоки.md"), source);
+  await page.locator(".tree-file").filter({ hasText: "Блоки" }).click();
+  await expect(page.locator(".cm-rendered-table table")).toContainText("Число");
+  await expect(page.locator(".cm-rendered-math .katex").first()).toBeVisible();
+  await expect(page.locator(".cm-rendered-mermaid .diagram svg")).toBeVisible();
+  await page.getByRole("button", { name: "Править таблицу", exact: true }).click();
+  await expect(page.locator(".cm-content")).toContainText("| Поле | Значение |");
+  await page.keyboard.press(`${modifier}+a`);
+  const changed = source.replace("| Число | 2 |", "| Число | 42 |");
+  await page.keyboard.insertText(changed);
+  await page.keyboard.press(`${modifier}+s`);
+  await expect.poll(() => fs.readFile(path.join(root, "Блоки.md"), "utf8")).toBe(changed);
+  await page.getByRole("button", { name: "Главная", exact: true }).click();
+  await page.locator('.tab-open[title="Блоки.md"]').click();
+  await expect(page.locator(".cm-rendered-table table")).toContainText("42");
+  await expect(page.locator(".cm-rendered-mermaid .diagram svg")).toBeVisible();
+});
+
+test("предпросмотр ссылки доступен в редакторе, ID блока не попадает в чтение", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.locator(".cm-wiki-link a").filter({ hasText: "Вторая" }).hover();
+  await expect(page.getByRole("tooltip")).toContainText("Связь на");
+  await fs.writeFile(
+    path.join(root, "Цель.md"),
+    "# Цель\n\nНачальный абзац.\n\nТочный фрагмент ^part\n\nПоследний абзац.",
+  );
+  await fs.writeFile(
+    path.join(root, "Блок-ссылка.md"),
+    "# Ссылки\n\n[[Цель#^part|К блоку]]\n\n![[Цель#^part]]\n",
+  );
+  await page.locator(".tree-file").filter({ hasText: "Блок-ссылка" }).click();
+  await page.getByRole("button", { name: "Чтение", exact: true }).click();
+  await expect(page.locator(".embed-note .markdown")).toContainText("Точный фрагмент");
+  await expect(page.locator(".embed-note .markdown")).not.toContainText(
+    "Начальный абзац",
+  );
+  await expect(page.locator(".embed-note .markdown")).not.toContainText(
+    "Последний абзац",
+  );
+  await page.getByRole("link", { name: "К блоку", exact: true }).click();
+  await expect(page.locator(".tab.active")).toContainText("Цель");
+  await expect(page.locator(".reading-pane #block-part")).toHaveText("Точный фрагмент");
+  await expect(page.locator(".reading-pane")).not.toContainText("^part");
+});

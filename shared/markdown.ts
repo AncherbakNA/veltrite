@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { normalizePath } from "./links";
+import { referenceBlocks } from "./markdown-blocks";
 import type { NoteIndex } from "./types";
 function plainProperties(value: unknown, active = new Set<object>(), depth = 0): unknown {
   if (depth > 20) throw Error("Слишком глубокие свойства");
@@ -86,6 +87,7 @@ export function indexNote(path: string, content: string): NoteIndex {
     links: links.filter(Boolean),
     headings,
     properties,
+    blocks: referenceBlocks(content).map(({ id, line }) => ({ id, line })),
     words: body.match(/[\p{L}\p{N}]+/gu)?.length || 0,
   };
 }

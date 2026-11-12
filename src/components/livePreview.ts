@@ -1,3 +1,4 @@
+import { syntaxTree } from "@codemirror/language";
 import type { Range } from "@codemirror/state";
 import {
   Decoration,
@@ -7,11 +8,19 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
+import { createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { renderedBlocks } from "../../shared/markdown-blocks";
+import { VaultFilesContext } from "../VaultContext";
+import NoteLink from "./NoteLink";
+import type { PreviewData } from "./liveBlocks";
+const roots = new WeakMap<HTMLElement, Root>();
 class WikiWidget extends WidgetType {
   constructor(
     private target: string,
     private label: string,
     private open: (target: string) => void,
+    private data: () => PreviewData,
   ) {
     super();
   }
@@ -21,13 +30,28 @@ class WikiWidget extends WidgetType {
   toDOM() {
     const span = document.createElement("span");
     span.className = "cm-wiki-link";
-    span.textContent = this.label;
-    span.title = this.target;
-    span.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      this.open(this.target);
-    });
+    const value = this.data(),
+      root = createRoot(span);
+    roots.set(span, root);
+    root.render(
+      createElement(
+        VaultFilesContext.Provider,
+        { value: value.paths },
+        createElement(NoteLink, {
+          target: this.target,
+          from: value.path,
+          index: value.index,
+          onOpen: this.open,
+          children: this.label,
+        }),
+      ),
+    );
     return span;
+  }
+  destroy(span: HTMLElement) {
+    const root = roots.get(span);
+    roots.delete(span);
+    queueMicrotask(() => root?.unmount());
   }
 }
 class TaskWidget extends WidgetType {
@@ -60,16 +84,37 @@ class TaskWidget extends WidgetType {
     return box;
   }
 }
-export function livePreview(open: (target: string) => void) {
+export function livePreview(open: (target: string) => void, data: () => PreviewData) {
   const build = (view: EditorView) => {
     const ranges: Range<Decoration>[] = [];
     const cursor = view.state.selection.main;
+    const blocks = renderedBlocks(view.state.doc.toString());
     for (const visible of view.visibleRanges) {
       let from = visible.from;
       while (from <= visible.to) {
         const line = view.state.doc.lineAt(from),
           text = line.text;
-        const active = cursor.from <= line.to && cursor.to >= line.from;
+        const active = view.hasFocus && cursor.from <= line.to && cursor.to >= line.from;
+        let syntax: ReturnType<typeof syntaxTree>["topNode"] | null = syntaxTree(
+          view.state,
+        ).resolveInner(line.from, 1);
+        let code = false;
+        while (syntax) {
+          if (["FencedCode", "CodeBlock", "InlineCode"].includes(syntax.name))
+            code = true;
+          syntax = syntax.parent;
+        }
+        const rendered = blocks.some(
+          (block) =>
+            line.from >= block.from &&
+            line.to <= block.to &&
+            (!view.hasFocus || cursor.from > block.to || cursor.to < block.from),
+        );
+        if (code || rendered) {
+          if (line.to >= view.state.doc.length) break;
+          from = line.to + 1;
+          continue;
+        }
         const level = /^(#{1,6})\s/.exec(text)?.[1].length;
         if (level)
           ranges.push(
@@ -90,7 +135,7 @@ export function livePreview(open: (target: string) => void) {
               end = start + match[0].length;
             ranges.push(
               Decoration.replace({
-                widget: new WikiWidget(match[1], match[2] || match[1], open),
+                widget: new WikiWidget(match[1], match[2] || match[1], open, data),
               }).range(start, end),
             );
             occupied.push({ from: start, to: end });
@@ -128,7 +173,12 @@ export function livePreview(open: (target: string) => void) {
         this.decorations = build(view);
       }
       update(update: ViewUpdate) {
-        if (update.docChanged || update.viewportChanged || update.selectionSet)
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          update.selectionSet ||
+          update.focusChanged
+        )
           this.decorations = build(update.view);
       }
     },

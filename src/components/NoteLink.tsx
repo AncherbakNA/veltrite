@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { frontmatter, resolveLink } from "../../shared/markdown";
+import { noteFragment } from "../../shared/markdown-blocks";
 import type { NoteIndex } from "../../shared/types";
 import { api } from "../useVault";
 import { VaultFilesContext } from "../VaultContext";
@@ -52,7 +53,10 @@ export default function NoteLink({
             if (hovering.current)
               setPreview({
                 title: resolved.replace(/\.md$/i, ""),
-                text: frontmatter(note.content).body.slice(0, 900),
+                text: (
+                  noteFragment(frontmatter(note.content).body, target) ||
+                  "Фрагмент не найден"
+                ).slice(0, 900),
                 x: Math.max(12, Math.min(rect.left, window.innerWidth - 360)),
                 y: Math.min(rect.bottom + 12, window.innerHeight - 270),
               });
