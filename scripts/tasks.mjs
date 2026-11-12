@@ -93,6 +93,10 @@ else if (task === "test") {
   await bundle();
   if (task === "e2e") run("node_modules/@playwright/test/cli.js", ["test"]);
   else if (task?.startsWith("dist:")) {
+    // GitHub emits absent optional secrets as empty strings; builder treats CSC_LINK="" as a file path.
+    for (const key of Object.keys(process.env))
+      if (/^(?:CSC_|WIN_CSC_|APPLE_)/.test(key) && !process.env[key]?.trim())
+        delete process.env[key];
     const target = preparePackage(task.startsWith("dist:mac") ? "mac" : "win");
     process.env.CSC_IDENTITY_AUTO_DISCOVERY =
       process.env.VELTRITE_SIGNED_MAC === "1" ? "true" : "false";
