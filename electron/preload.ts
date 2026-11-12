@@ -37,7 +37,9 @@ const methods = [
   "beginLogin",
   "finishLogin",
   "cancelLogin",
+  "updateState",
   "checkUpdate",
+  "downloadUpdate",
   "installUpdate",
   "publishSite",
   "webViewer",
@@ -70,6 +72,7 @@ function subscribe(channel: string, callback: (...args: any[]) => void) {
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 }
+api.onUpdateState = (callback: any) => subscribe("updates:state", callback);
 api.onPluginAction = (callback: any) => subscribe("plugins:action", callback);
 api.onPluginsChanged = (callback: any) => subscribe("plugins:changed", callback);
 api.onChange = (callback: any) => subscribe("vault:changed", callback);

@@ -43,6 +43,16 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(null), error ? 12000 : 5000);
   }, []);
   const error = useCallback((text: string) => message(text, true), [message]);
+  const [updating, setUpdating] = useState(false),
+    updatingRef = useRef(false);
+  updatingRef.current = updating;
+  useEffect(
+    () =>
+      api().onUpdateState((state) => {
+        if (state.phase === "error") setUpdating(false);
+      }),
+    [],
+  );
   const workspace = useVault(error);
   const { state, tabs, active, current, index, mode } = workspace;
   const setMode = workspace.setPaneMode;
@@ -73,6 +83,7 @@ export default function App() {
     [recentOpen, setRecentOpen] = useState(false);
   const recorder = useRef<MediaRecorder | null>(null),
     chunks = useRef<Blob[]>([]),
+    audioSave = useRef<Promise<unknown> | null>(null),
     openHistory = useRef<string[]>([]),
     historyPosition = useRef(-1),
     actionRef = useRef<(a: string) => void>(() => {});
@@ -132,6 +143,10 @@ export default function App() {
   useEffect(() => api().onMenu((action) => actionRef.current(action)), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (updatingRef.current) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === "Escape") {
         setPalette(null);
         setDialog(null);
@@ -215,7 +230,7 @@ export default function App() {
           workspace.edit(draft.path, draft.content + action.text);
           return;
         }
-        workspace.setPaneMode("live");
+        workspace.setPaneMode((previous) => (previous === "read" ? "live" : previous));
         setTimeout(
           () =>
             window.dispatchEvent(
@@ -401,6 +416,7 @@ export default function App() {
     });
   const record = () =>
     run(async () => {
+      if (audioSave.current) throw Error("Дождитесь сохранения записи");
       if (recorder.current?.state === "recording") {
         recorder.current.stop();
         return;
@@ -414,9 +430,8 @@ export default function App() {
       chunks.current = [];
       audio.ondataavailable = (e) => chunks.current.push(e.data);
       audio.onstop = () => {
-        setRecording(false);
         stream.getTracks().forEach((t) => t.stop());
-        run(async () => {
+        const pending = run(async () => {
           const data = new Uint8Array(
               await new Blob(chunks.current, {
                 type: "audio/webm",
@@ -431,6 +446,13 @@ export default function App() {
             note.revision,
           );
           await workspace.refresh();
+        });
+        audioSave.current = pending;
+        void pending.finally(() => {
+          if (audioSave.current === pending) {
+            audioSave.current = null;
+            setRecording(false);
+          }
         });
       };
       audio.start();
@@ -538,6 +560,7 @@ export default function App() {
     return off;
   }, [settings]);
   actionRef.current = (action: string) => {
+    if (updatingRef.current) return;
     if (action === "home") {
       setHome(true);
       setCollection(null);
@@ -562,6 +585,10 @@ export default function App() {
       return;
     }
     if (action === "request-close") {
+      if (recording || audioSave.current) {
+        error("Сначала завершите запись и дождитесь её сохранения");
+        return;
+      }
       run(async () => {
         if (recording) throw Error("Сначала остановите аудиозапись");
         await workspace.flush();
@@ -654,6 +681,12 @@ export default function App() {
   return (
     <VaultFilesContext.Provider value={vaultPaths}>
       <div className="app-shell">
+        {updating && (
+          <div className="update-lock" role="status">
+            <Clock3 size={20} />
+            <p>Сохраняем заметки и перезапускаем приложение…</p>
+          </div>
+        )}
         <WindowTabs
           tabs={tabs}
           active={active}
@@ -934,6 +967,24 @@ export default function App() {
         {settings && preferences && (
           <Suspense fallback={null}>
             <Settings
+              version={state.version}
+              onInstallUpdate={async () => {
+                if (recording || audioSave.current)
+                  throw Error("Сначала завершите запись и дождитесь её сохранения");
+                const update = await api().updateState();
+                if (update.automatic) {
+                  updatingRef.current = true;
+                  setUpdating(true);
+                }
+                try {
+                  await workspace.flush();
+                  await api().installUpdate();
+                } catch (error) {
+                  updatingRef.current = false;
+                  setUpdating(false);
+                  throw error;
+                }
+              }}
               preferences={preferences}
               initialTab={settingsTab}
               sync={state.sync}

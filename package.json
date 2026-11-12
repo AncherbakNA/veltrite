@@ -1,7 +1,7 @@
 {
   "name": "veltrite",
   "productName": "Veltrite",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Локальная база знаний с Markdown и зашифрованной синхронизацией через GitHub",
   "author": "Veltrite contributors",
   "license": "MIT",
@@ -40,7 +40,8 @@
     "jsep": "^1.4.0",
     "@fontsource/source-serif-4": "5.3.1",
     "leaflet": "1.9.4",
-    "d3-force": "3.0.1"
+    "d3-force": "3.0.1",
+    "electron-updater": "6.8.12"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0",
@@ -103,7 +104,12 @@
       "uninstallerIcon": "icon.ico"
     },
     "artifactName": "Veltrite-${version}-${os}-${arch}.${ext}",
-    "publish": null,
+    "publish": {
+      "provider": "github",
+      "owner": "AncherbakNA",
+      "repo": "veltrite",
+      "releaseType": "release"
+    },
     "extraResources": [
       {
         "from": "resources/icon.png",

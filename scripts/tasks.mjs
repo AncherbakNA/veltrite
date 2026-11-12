@@ -43,6 +43,9 @@ async function bundle() {
     target: "node22",
     external: ["electron"],
     define: {
+      "process.env.VELTRITE_SIGNED_MAC": JSON.stringify(
+        process.env.VELTRITE_SIGNED_MAC || "0",
+      ),
       "process.env.VELTRITE_GITHUB_CLIENT_ID": JSON.stringify(
         process.env.VELTRITE_GITHUB_CLIENT_ID || "",
       ),
@@ -90,8 +93,9 @@ else if (task === "test") {
   await bundle();
   if (task === "e2e") run("node_modules/@playwright/test/cli.js", ["test"]);
   else if (task?.startsWith("dist:")) {
-    const target = preparePackage();
-    process.env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+    const target = preparePackage(task.startsWith("dist:mac") ? "mac" : "win");
+    process.env.CSC_IDENTITY_AUTO_DISCOVERY =
+      process.env.VELTRITE_SIGNED_MAC === "1" ? "true" : "false";
     process.env.ELECTRON_CACHE = resolve("../cache/electron");
     process.env.ELECTRON_BUILDER_CACHE = resolve("../cache/builder");
     run("node_modules/electron-builder/out/cli/cli.js", [

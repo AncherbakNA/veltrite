@@ -19,8 +19,11 @@ import { useDialogFocus } from "../useDialogFocus";
 import { api } from "../useVault";
 import BrandMark from "./BrandMark";
 import CatalogBrowser from "./CatalogBrowser";
+import UpdatePanel from "./UpdatePanel";
 export default function Settings({
   preferences,
+  version,
+  onInstallUpdate,
   initialTab = "appearance",
   sync,
   onPreferences,
@@ -31,6 +34,8 @@ export default function Settings({
   onImport,
 }: {
   preferences: Preferences;
+  version: string;
+  onInstallUpdate: () => Promise<void>;
   initialTab?: string;
   sync: SyncStatus;
   onPreferences: (p: Preferences) => void;
@@ -668,28 +673,8 @@ export default function Settings({
                 Обычные Markdown-файлы, открытый формат холстов JSON Canvas, локальная
                 работа и ваш собственный GitHub-репозиторий.
               </div>
-              <div className="setting-row">
-                <div>
-                  <strong>Версия 0.2.1</strong>
-                  <small>macOS · Windows</small>
-                </div>
-                <button
-                  onClick={() =>
-                    run(async () => {
-                      const update = await api().checkUpdate();
-                      if (!update)
-                        onMessage(
-                          "Для этой сборки не задан публичный репозиторий обновлений. Новую версию можно скачать в GitHub Releases.",
-                        );
-                      else if (update.available) {
-                        await api().installUpdate();
-                      } else onMessage("Установлена последняя версия");
-                    })
-                  }
-                >
-                  Проверить обновления
-                </button>
-              </div>
+              <p className="muted">Версия {version} · macOS · Windows</p>
+              <UpdatePanel onInstall={onInstallUpdate} onError={onError} />
             </>
           )}
         </div>

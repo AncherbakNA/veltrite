@@ -1,3 +1,4 @@
+import { signingConfig, packageVersion } from "./signing.mjs";
 import { collectNotices } from "./notices.mjs";
 import {
   cpSync,
@@ -8,7 +9,7 @@ import {
   rmSync,
 } from "node:fs";
 import { resolve, join } from "node:path";
-export function preparePackage() {
+export function preparePackage(platform) {
   const manifest = JSON.parse(readFileSync("package.json", "utf8"));
   const target = resolve("../package");
   const marker = join(target, ".veltrite-package");
@@ -20,7 +21,7 @@ export function preparePackage() {
   for (const name of ["dist", "dist-electron"])
     cpSync(name, join(target, name), { recursive: true, force: true });
   const build = {
-    ...manifest.build,
+    ...signingConfig(manifest.build, process.env, platform),
     electronVersion: manifest.devDependencies.electron,
     extraResources: [
       { from: resolve("resources/icon.png"), to: "icon.png" },
@@ -41,7 +42,7 @@ export function preparePackage() {
       {
         name: manifest.name,
         productName: manifest.productName,
-        version: manifest.version,
+        version: packageVersion(manifest, process.env),
         description: manifest.description,
         author: manifest.author,
         license: manifest.license,

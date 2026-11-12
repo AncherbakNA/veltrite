@@ -2,6 +2,7 @@ import type { CatalogEntry, CatalogInfo } from "./catalog";
 import type { EditorContext, PluginAction, PluginPermission } from "./extensions";
 import type { WorkspaceSession } from "./panes";
 import type { ThemeDefinition } from "./themes";
+import type { UpdateState } from "./updates";
 export type Theme = "dark" | "light" | "system";
 export interface Preferences {
   customTheme: ThemeDefinition | null;
@@ -237,12 +238,11 @@ export interface VeltriteAPI {
   }>;
   finishLogin(): Promise<SyncStatus>;
   cancelLogin(): Promise<void>;
-  checkUpdate(): Promise<{
-    version: string;
-    url: string;
-    available: boolean;
-  } | null>;
+  updateState(): Promise<UpdateState>;
+  checkUpdate(): Promise<UpdateState>;
+  downloadUpdate(): Promise<UpdateState>;
   installUpdate(): Promise<void>;
+  onUpdateState(callback: (state: UpdateState) => void): () => void;
   publishSite(
     pages: { path: string; title: string; html: string }[],
   ): Promise<number | null>;

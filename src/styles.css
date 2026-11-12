@@ -1995,3 +1995,33 @@ h3,
   font-size: 12px;
   color: var(--muted);
 }
+.update-panel {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.update-panel .button-row {
+  flex-wrap: wrap;
+}
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.update-progress progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.update-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--muted);
+}

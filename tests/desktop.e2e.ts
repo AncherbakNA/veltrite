@@ -904,6 +904,9 @@ test("JavaScript-расширение запрашивает разрешени�
   };`,
   );
   await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.keyboard.press(`${modifier}+p`);
+  await page.getByPlaceholder("Найти команду…").fill("Редактор: исходный код");
+  await page.keyboard.press("Enter");
   await page.keyboard.press(`${modifier}+,`);
   await page.getByRole("button", { name: "Расширения", exact: true }).click();
   await page.getByRole("switch", { name: "Тест sandbox · 1.0.0" }).click();
@@ -914,6 +917,7 @@ test("JavaScript-расширение запрашивает разрешени�
   await expect(page.getByRole("switch", { name: "Тест sandbox · 1.0.0" })).toBeChecked();
   await page.keyboard.press("Escape");
   await page.evaluate(() => window.veltrite.executePlugin("sandbox", "run"));
+  await expect(page.locator(".source-editor")).toBeVisible();
   await expect
     .poll(() => fs.readFile(path.join(root, "Начало.md"), "utf8"))
     .toContain("ВСТАВКА ИЗ РАСШИРЕНИЯ");

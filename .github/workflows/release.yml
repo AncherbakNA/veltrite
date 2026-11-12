@@ -2,29 +2,48 @@ name: Сборка релиза
 on:
   push:
     tags: ["v*"]
+    branches: ["codex/**"]
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
-    name: Сборка · ${{ matrix.target }}
+    name: Сборка и установка · ${{ matrix.target }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-latest
             target: mac-arm64
+            platform: mac
             task: dist:mac
-          - os: macos-latest
+          - os: macos-15-intel
             target: mac-x64
+            platform: mac
             task: dist:mac:x64
           - os: windows-latest
             target: win-x64
+            platform: win
             task: dist:win
     runs-on: ${{ matrix.os }}
     env:
       VELTRITE_RELEASE_REPOSITORY: ${{ github.event.repository.private == false && github.repository || '' }}
       VELTRITE_GITHUB_CLIENT_ID: ${{ vars.VELTRITE_GITHUB_CLIENT_ID }}
+      VELTRITE_SIGNED_MAC: ${{ matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC || '0' }}
+      VELTRITE_SIGNED_WIN: ${{ matrix.platform == 'win' && vars.VELTRITE_SIGNED_WIN || '0' }}
+      VELTRITE_WINDOWS_PUBLISHER: ${{ vars.VELTRITE_WINDOWS_PUBLISHER }}
+      CSC_LINK: ${{ matrix.platform == 'win' && vars.VELTRITE_SIGNED_WIN == '1' && secrets.WINDOWS_CERTIFICATE_P12 || matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC == '1' && secrets.MAC_CERTIFICATE_P12 || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && vars.VELTRITE_SIGNED_WIN == '1' && secrets.WINDOWS_CERTIFICATE_PASSWORD || matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC == '1' && secrets.MAC_CERTIFICATE_PASSWORD || '' }}
+      APPLE_ID: ${{ matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC == '1' && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC == '1' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC == '1' && secrets.APPLE_TEAM_ID || '' }}
+      APPLE_API_KEY_BASE64: ${{ matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC == '1' && secrets.APPLE_API_KEY_BASE64 || '' }}
+      APPLE_API_KEY_ID: ${{ matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC == '1' && secrets.APPLE_API_KEY_ID || '' }}
+      APPLE_API_ISSUER: ${{ matrix.platform == 'mac' && vars.VELTRITE_SIGNED_MAC == '1' && secrets.APPLE_API_ISSUER || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -37,20 +56,43 @@ jobs:
       - name: Проверить версию тега
         if: startsWith(github.ref, 'refs/tags/')
         run: node scripts/verify-tag.mjs
+      - name: Подготовить нотарификацию
+        run: node scripts/prepare-signing.mjs
       - name: Проверить исходники
         run: pnpm check
-      - name: Проверить синхронизацию
+      - name: Модульные проверки
         run: pnpm test
       - name: Собрать установщики
         run: node scripts/workspace.mjs ${{ matrix.task }}
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - name: Проверить установленный пакет и обновление
+        working-directory: ${{ runner.temp }}/Veltrite-local/workspace
+        run: node scripts/native-acceptance.mjs ${{ matrix.platform }}
+      - name: Удалить временный ключ нотарификации
+        if: always()
+        run: node scripts/prepare-signing.mjs --cleanup
+      - name: Сохранить установщики
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Veltrite-${{ matrix.target }}
           path: |
             ${{ runner.temp }}/Veltrite-local/releases/*.dmg
             ${{ runner.temp }}/Veltrite-local/releases/*.exe
             ${{ runner.temp }}/Veltrite-local/releases/*.zip
+            ${{ runner.temp }}/Veltrite-local/releases/*.blockmap
           if-no-files-found: error
+          retention-days: 1
+      - name: Сохранить отчёт приёмки
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Приёмка-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/Veltrite-local/native-*/report.json
+            ${{ runner.temp }}/Veltrite-local/playwright-report
+            ${{ runner.temp }}/Veltrite-local/test-results
+          if-no-files-found: ignore
+          retention-days: 7
   draft:
     name: Подготовить черновик GitHub Release
     needs: build
@@ -60,12 +102,16 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: ${{ runner.temp }}/Veltrite-release
-          merge-multiple: true
-      - name: Создать контрольные суммы
-        run: node scripts/checksums.mjs "$RUNNER_TEMP/Veltrite-release"
+          pattern: Veltrite-*
+          path: ${{ runner.temp }}/Veltrite-artifacts
+          merge-multiple: false
+      - name: Собрать ленты обновлений и контрольные суммы
+        run: node scripts/release-files.mjs "$RUNNER_TEMP/Veltrite-artifacts" "$RUNNER_TEMP/Veltrite-release" "${GITHUB_REF_NAME#v}"
       - name: Создать черновик релиза
         env:
           GH_TOKEN: ${{ github.token }}

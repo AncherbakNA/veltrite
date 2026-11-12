@@ -26,10 +26,13 @@ import { safePath } from "./paths";
 import { pluginPreload, PluginRuntime } from "./plugin-runtime";
 import { Plugins } from "./plugins";
 import { synchronize, type SyncCheckpoint } from "./sync";
+import type { UpdateController } from "./update-controller";
+import { createUpdates } from "./updates";
 import { atomicWrite, hash, MAX_FILE, Serial, Vault } from "./vault";
 import { WebCards, type CardBounds } from "./web-cards";
 const CLIENT_ID = process.env.VELTRITE_GITHUB_CLIENT_ID || "";
-const RELEASE_REPOSITORY = process.env.VELTRITE_RELEASE_REPOSITORY || "";
+const RELEASE_REPOSITORY =
+  process.env.VELTRITE_RELEASE_REPOSITORY || "AncherbakNA/veltrite";
 const testMode = process.env.VELTRITE_TEST_MODE === "1";
 if (testMode) {
   if (!process.env.VELTRITE_TEST_DATA || !path.isAbsolute(process.env.VELTRITE_TEST_DATA))
@@ -59,6 +62,8 @@ app.setName("Veltrite");
 if (process.platform === "win32") app.setAppUserModelId("app.veltrite.desktop");
 let mainWindow: BrowserWindow;
 let webCards: WebCards;
+let updates: UpdateController;
+let installingUpdate = false;
 let pluginRuntime: PluginRuntime | null = null;
 let editorContext: EditorContext = {
   path: null,
@@ -529,32 +534,34 @@ const methods: Record<string, (...args: any[]) => any> = {
     login = null;
     pendingToken = null;
   },
-  checkUpdate: async () => {
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(RELEASE_REPOSITORY)) return null;
-    const response = await fetch(
-      "https://api.github.com/repos/" + RELEASE_REPOSITORY + "/releases/latest",
-      {
-        headers: { Accept: "application/vnd.github+json" },
-        redirect: "error",
-        signal: AbortSignal.timeout(15000),
-      },
-    );
-    if (!response.ok) throw Error("Не удалось проверить обновление");
-    const data = (await response.json()) as any;
-    const version = String(data.tag_name || "").replace(/^v/, "");
-    if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error("Некорректная версия обновления");
-    return {
-      version,
-      url: "https://github.com/" + RELEASE_REPOSITORY + "/releases/latest",
-      available:
-        version.localeCompare(app.getVersion(), undefined, { numeric: true }) > 0,
-    };
-  },
+  updateState: () => updates.state(),
+  checkUpdate: () => updates.check(),
+  downloadUpdate: () => updates.download(),
   installUpdate: async () => {
-    if (!RELEASE_REPOSITORY) throw Error("Репозиторий релизов ещё не настроен");
-    await shell.openExternal(
-      "https://github.com/" + RELEASE_REPOSITORY + "/releases/latest",
-    );
+    const state = updates.state();
+    if (state.automatic) {
+      if (state.phase !== "ready") throw Error("Сначала загрузите обновление");
+      if (
+        testMode &&
+        (process.platform !== "win32" || process.env.VELTRITE_TEST_INSTALL_UPDATE !== "1")
+      )
+        throw Error("Установка обновлений в этом тестовом режиме отключена");
+      await pluginRuntime?.close();
+      webCards.closeAll();
+      await serial.run(async () => {});
+      for (const window of BrowserWindow.getAllWindows())
+        if (window !== mainWindow) window.destroy();
+      installingUpdate = true;
+    }
+    try {
+      await updates.install(
+        true,
+        !(testMode && process.env.VELTRITE_TEST_NO_RELAUNCH === "1"),
+      );
+    } catch (error) {
+      installingUpdate = false;
+      throw error;
+    }
   },
   publishSite: async (pages: StaticPage[]) => {
     const destination = await dialog.showOpenDialog(mainWindow, {
@@ -746,6 +753,15 @@ async function createWindow() {
     },
   });
   webCards = new WebCards(mainWindow);
+  updates = await createUpdates({
+    repository: RELEASE_REPOSITORY,
+    macSigned: process.env.VELTRITE_SIGNED_MAC === "1",
+    testMode,
+    changed: (state) => {
+      if (state.phase === "error") installingUpdate = false;
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send("updates:state", state);
+    },
+  });
   pluginRuntime = new PluginRuntime(
     plugins,
     {
@@ -781,7 +797,7 @@ async function createWindow() {
   await mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   void pluginRuntime.startEnabled().catch(() => {});
   mainWindow.on("close", (event) => {
-    if (testMode) return;
+    if (testMode || installingUpdate) return;
     event.preventDefault();
     mainWindow.webContents.send("app:menu", "request-close");
   });
