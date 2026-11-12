@@ -151,7 +151,7 @@ export default function DocumentPane({
             content={current.content}
             onChange={(text) => workspace.edit(current.path, text)}
             index={index}
-            onOpen={(path) => open(path, pane.id)}
+            onOpen={(target, from = current.path) => openLink(target, from, pane.id)}
             onChooseFile={(add) =>
               setPalette({
                 placeholder: "Выберите файл для холста…",

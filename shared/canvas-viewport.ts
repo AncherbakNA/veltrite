@@ -39,13 +39,16 @@ export function canvasVisibility(
     const a = byId.get(edge.fromNode),
       b = byId.get(edge.toNode);
     if (!a || !b) return false;
-    const bend = Math.max(60, Math.abs(a.x - b.x) * 0.5);
+    const bend = Math.max(
+      60,
+      Math.hypot(a.x - b.x, a.y - b.y, a.width, b.width, a.height, b.height) * 0.5,
+    );
     return (
       selected.has(edge.id) ||
       (Math.min(a.x, b.x) - bend <= rect.right &&
         Math.max(a.x + a.width, b.x + b.width) + bend >= rect.left &&
-        Math.min(a.y, b.y) <= rect.bottom &&
-        Math.max(a.y + a.height, b.y + b.height) >= rect.top)
+        Math.min(a.y, b.y) - bend <= rect.bottom &&
+        Math.max(a.y + a.height, b.y + b.height) + bend >= rect.top)
     );
   });
   return { nodes, edges, byId };

@@ -26,7 +26,8 @@ export default function PdfViewer({
   path: string;
   fragment?: string;
 }) {
-  const first = Number(new URLSearchParams(fragment.replace(/^#/, "")).get("page")) || 1;
+  const requested = Number(new URLSearchParams(fragment.replace(/^#/, "")).get("page"));
+  const first = Number.isFinite(requested) ? Math.max(1, Math.trunc(requested)) : 1;
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null),
     [page, setPage] = useState(first),
     [scale, setScale] = useState(1),
@@ -45,7 +46,9 @@ export default function PdfViewer({
   const host = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null),
     text = useRef<HTMLDivElement>(null),
-    searchRun = useRef(0);
+    searchRun = useRef(0),
+    currentPdf = useRef(pdf);
+  currentPdf.current = pdf;
   useEffect(() => {
     const element = host.current;
     if (!element) return;
@@ -177,15 +180,17 @@ export default function PdfViewer({
       ).detail;
       if (
         detail.path === path &&
-        host.current?.closest<HTMLElement>("[data-pane-id]")?.dataset.paneId ===
-          detail.paneId &&
-        pdf
+        host.current?.parentElement?.dataset.paneId === detail.paneId &&
+        currentPdf.current &&
+        Number.isFinite(detail.page)
       )
-        setPage(Math.min(pdf.numPages, Math.max(1, detail.page)));
+        setPage(
+          Math.min(currentPdf.current.numPages, Math.max(1, Math.trunc(detail.page))),
+        );
     };
     window.addEventListener("veltrite:pdf-page", navigate);
     return () => window.removeEventListener("veltrite:pdf-page", navigate);
-  }, [path, pdf]);
+  }, [path]);
   const find = async () => {
     if (!pdf) return;
     const run = ++searchRun.current,
@@ -242,7 +247,10 @@ export default function PdfViewer({
           value={page}
           onChange={(e) =>
             setPage(
-              Math.max(1, Math.min(pdf?.numPages || 1, Number(e.target.value) || 1)),
+              Math.max(
+                1,
+                Math.min(pdf?.numPages || 1, Math.trunc(Number(e.target.value)) || 1),
+              ),
             )
           }
         />

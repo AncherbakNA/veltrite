@@ -377,6 +377,7 @@ test("несвязанное упоминание превращается в с
     window.veltrite.create("Упоминание.md", "Начало — обычный текст."),
   );
   await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await expect(page.locator(".cm-content")).toBeVisible();
   if (!(await page.locator(".inspector").isVisible()))
     await page.locator(".panel-toggle").click();
   await page.getByRole("button", { name: "Несвязанные упоминания", exact: true }).click();
@@ -767,9 +768,7 @@ test("импорт структуры папки, относительные в�
     )
     .toBeGreaterThan(0);
   await page.locator(".tree-file").filter({ hasText: "Карта" }).click();
-  await expect(page.getByRole("textbox", { name: "Текст карточки" })).toHaveValue(
-    "Из исходной папки",
-  );
+  await expect(page.locator(".canvas-text-preview")).toContainText("Из исходной папки");
   expect(await fs.readFile(path.join(destination, "Карта.canvas"), "utf8")).toBe(canvas);
   expect(await fs.readFile(path.join(source, "Раздел", "Пример.md"), "utf8")).toBe(
     original,
@@ -899,6 +898,117 @@ test("создание холста, изменение карточки и со
     )
     .toBe("Связь идей");
   await page.screenshot({ path: "../screenshots/canvas.png" });
+});
+test("холст: просмотр Markdown, клавиатурная правка, фон группы и концы связей", async () => {
+  await fs.writeFile(
+    path.join(root, "фон.png"),
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jN1sAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  );
+  await page.evaluate(() =>
+    window.veltrite.create(
+      "Оформление.canvas",
+      JSON.stringify({
+        custom: "сохранить",
+        nodes: [
+          {
+            id: "g",
+            type: "group",
+            x: 0,
+            y: 0,
+            width: 900,
+            height: 500,
+            label: "Работа",
+          },
+          {
+            id: "a",
+            type: "text",
+            x: 40,
+            y: 170,
+            width: 300,
+            height: 230,
+            text: "# Заголовок\n\n**Жирный текст** и [[Вторая]].",
+          },
+          {
+            id: "b",
+            type: "text",
+            x: 550,
+            y: 170,
+            width: 300,
+            height: 230,
+            text: "Вторая карточка",
+          },
+        ],
+        edges: [{ id: "e", fromNode: "a", toNode: "b", label: "Переход" }],
+      }),
+    ),
+  );
+  await page.locator(".tree-file").filter({ hasText: "Оформление" }).click();
+  await expect(page.locator(".canvas-text-preview h1")).toContainText("Заголовок");
+  await expect(page.locator(".canvas-text-preview strong")).toContainText("Жирный текст");
+  await expect(page.locator(".canvas-node textarea")).toHaveCount(0);
+  await page.locator(".canvas-text-preview strong").dblclick();
+  await page
+    .getByRole("textbox", { name: "Текст карточки", exact: true })
+    .fill("## Изменено\n\nСодержимое карточки и [[Вторая]].");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".canvas-text-preview h2")).toContainText("Изменено");
+  await page.keyboard.press("F2");
+  await expect(
+    page.getByRole("textbox", { name: "Текст карточки", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await page.getByLabel("Название группы", { exact: true }).click();
+  await page.getByLabel("Изображение фона группы", { exact: true }).fill("фон.png");
+  await page.getByLabel("Режим фона группы", { exact: true }).selectOption("repeat");
+  await expect(page.locator(".canvas-node.group")).toHaveCSS(
+    "background-repeat",
+    "repeat",
+  );
+  expect(
+    await page
+      .locator(".canvas-node.group")
+      .evaluate((node) => getComputedStyle(node).backgroundImage),
+  ).toContain("veltrite-asset://vault/");
+  await page.locator(".canvas-edges text").filter({ hasText: "Переход" }).click();
+  await page.getByLabel("Стрелка в начале связи", { exact: true }).selectOption("arrow");
+  await page.getByLabel("Стрелка в конце связи", { exact: true }).selectOption("none");
+  await page.getByLabel("Сторона начала связи", { exact: true }).selectOption("bottom");
+  await page.getByLabel("Сторона конца связи", { exact: true }).selectOption("top");
+  await expect(page.locator("path.edge")).toHaveAttribute("marker-start", "url(#arrow)");
+  await expect(page.locator("path.edge")).not.toHaveAttribute("marker-end");
+  await page.keyboard.press(`${modifier}+s`);
+  await expect
+    .poll(
+      async () =>
+        JSON.parse(await fs.readFile(path.join(root, "Оформление.canvas"), "utf8"))
+          .edges[0],
+    )
+    .toMatchObject({
+      fromEnd: "arrow",
+      toEnd: "none",
+      fromSide: "bottom",
+      toSide: "top",
+    });
+  const saved = JSON.parse(
+    await fs.readFile(path.join(root, "Оформление.canvas"), "utf8"),
+  );
+  expect(saved.custom).toBe("сохранить");
+  expect(saved.nodes[0]).toMatchObject({
+    background: "фон.png",
+    backgroundStyle: "repeat",
+  });
+  expect(saved.nodes[1].text).toContain("## Изменено");
+  await page
+    .locator(".canvas-text-preview")
+    .getByRole("link", { name: "Вторая", exact: true })
+    .click();
+  await expect(page.getByRole("tab", { name: "Вторая", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 });
 test("новая заметка, свойства, закладка, история и восстановление из корзины", async () => {
   await application.evaluate(({ BrowserWindow }) =>
@@ -1375,7 +1485,24 @@ test("большой холст сохраняет все карточки и о
   await expect(page.locator(".canvas-overview")).toHaveCount(0);
   await expect.poll(() => page.locator(".canvas-node").count()).toBeGreaterThan(0);
   expect(await page.locator(".canvas-node").count()).toBeLessThan(300);
-  await page.locator(".canvas-node textarea").first().fill("Изменённая карточка");
+  const headerIndex = await page
+    .locator(".canvas-node.text .canvas-node-header")
+    .evaluateAll((headers) => {
+      const bounds = document.querySelector(".canvas-view")!.getBoundingClientRect();
+      return headers.findIndex((header) => {
+        const rect = header.getBoundingClientRect();
+        return (
+          rect.left >= bounds.left &&
+          rect.right <= bounds.right &&
+          rect.top >= bounds.top + 120 &&
+          rect.bottom < bounds.bottom - 60
+        );
+      });
+    });
+  expect(headerIndex).toBeGreaterThanOrEqual(0);
+  await page.locator(".canvas-node.text .canvas-node-header").nth(headerIndex).click();
+  await page.getByTitle("Редактировать карточку", { exact: true }).click();
+  await page.locator(".canvas-node textarea").fill("Изменённая карточка");
   await expect
     .poll(async () =>
       JSON.parse(await fs.readFile(path.join(root, "Большой.canvas"), "utf8")).nodes.some(

@@ -7,6 +7,7 @@ import {
   Maximize,
   MousePointer2,
   Move,
+  Pencil,
   Plus,
   Trash2,
   ZoomIn,
@@ -17,7 +18,9 @@ import { canvasVisibility, viewport } from "../../shared/canvas-viewport";
 import { plural } from "../../shared/format";
 import { validateCanvas } from "../../shared/markdown";
 import type { CanvasData, CanvasNode, NoteIndex } from "../../shared/types";
+import { assetUrl } from "../assets";
 import { fileTitle } from "../ui";
+import CanvasOptions from "./CanvasOptions";
 import CanvasOverview from "./CanvasOverview";
 import Embedded from "./Embedded";
 import { EmbeddingRoot } from "./EmbeddingContext";
@@ -45,14 +48,14 @@ function FileCard({
   file: string;
   subpath?: string;
   index: NoteIndex[];
-  onOpen: (p: string) => void;
+  onOpen: (p: string, from?: string) => void;
 }) {
   return (
     <Embedded
       target={file + (subpath || "")}
       from=""
       index={index}
-      onLink={(target) => onOpen(target)}
+      onLink={(target) => onOpen(target, "")}
     />
   );
 }
@@ -71,7 +74,7 @@ export default function Canvas({
   path?: string;
   onChange: (text: string) => void;
   index: NoteIndex[];
-  onOpen: (p: string) => void;
+  onOpen: (p: string, from?: string) => void;
   onChooseFile: (add: (file: string) => void) => void;
   onChooseLink: (add: (url: string) => void) => void;
 }) {
@@ -99,6 +102,7 @@ export default function Canvas({
     return () => observer.disconnect();
   }, []);
   const [selected, setSelected] = useState<string[]>([]),
+    [editing, setEditing] = useState<string | null>(null),
     [connect, setConnect] = useState(false),
     [panMode, setPanMode] = useState(false);
   const drag = useRef<any>(null),
@@ -224,6 +228,7 @@ export default function Canvas({
           : [...dataRef.current.nodes, node],
     });
     setSelected([node.id]);
+    if (type === "text") setEditing(node.id);
     queueMicrotask(fit);
   };
   const remove = () => {
@@ -265,7 +270,15 @@ export default function Canvas({
         tabIndex={0}
         onKeyDown={(e) => {
           if (readOnly) return;
-          if ((e.target as HTMLElement).matches("textarea,input")) return;
+          if ((e.target as HTMLElement).closest("textarea,input,select,button,a")) return;
+          if (
+            (e.key === "Enter" || e.key === "F2") &&
+            selected.length === 1 &&
+            data.nodes.some((node) => node.id === selected[0] && node.type === "text")
+          ) {
+            e.preventDefault();
+            setEditing(selected[0]);
+          }
           if (e.key === "Delete" || e.key === "Backspace") {
             e.preventDefault();
             remove();
@@ -456,28 +469,18 @@ export default function Canvas({
                 </button>
               </>
             )}
-            {data.edges
-              .filter((edge) => selected.includes(edge.id))
-              .slice(0, 1)
-              .map((edge) => (
-                <input
-                  key={edge.id}
-                  className="edge-label-input"
-                  aria-label="Подпись связи"
-                  placeholder="Подпись связи"
-                  value={edge.label || ""}
-                  onChange={(event) =>
-                    commit({
-                      ...data,
-                      edges: data.edges.map((item) =>
-                        item.id === edge.id
-                          ? { ...item, label: event.target.value }
-                          : item,
-                      ),
-                    })
-                  }
-                />
-              ))}
+            {selected.length === 1 &&
+              data.nodes.some(
+                (node) => node.id === selected[0] && node.type === "text",
+              ) && (
+                <button
+                  title="Редактировать карточку"
+                  onClick={() => setEditing(selected[0])}
+                >
+                  <Pencil size={16} />
+                </button>
+              )}
+            <CanvasOptions data={data} selected={selected} onChange={commit} />
           </div>
         )}
         {parse.error && (
@@ -543,7 +546,13 @@ export default function Canvas({
                 if (!from || !to) return null;
                 const a = point(from, edge.fromSide),
                   b = point(to, edge.toSide || "left"),
-                  bend = Math.max(60, Math.abs(a.x - b.x) * 0.5);
+                  bend = Math.max(60, Math.hypot(a.x - b.x, a.y - b.y) * 0.5),
+                  control = (p: { x: number; y: number }, side: string) => ({
+                    x: p.x + (side === "left" ? -bend : side === "right" ? bend : 0),
+                    y: p.y + (side === "top" ? -bend : side === "bottom" ? bend : 0),
+                  }),
+                  c = control(a, edge.fromSide || "right"),
+                  d = control(b, edge.toSide || "left");
                 return (
                   <g
                     key={edge.id}
@@ -554,7 +563,7 @@ export default function Canvas({
                   >
                     <path
                       className={"edge " + (selected.includes(edge.id) ? "selected" : "")}
-                      d={`M ${a.x} ${a.y} C ${a.x + bend} ${a.y}, ${b.x - bend} ${b.y}, ${b.x} ${b.y}`}
+                      d={`M ${a.x} ${a.y} C ${c.x} ${c.y}, ${d.x} ${d.y}, ${b.x} ${b.y}`}
                       stroke={color(edge.color)}
                       markerEnd={edge.toEnd === "none" ? undefined : "url(#arrow)"}
                       markerStart={edge.fromEnd === "arrow" ? "url(#arrow)" : undefined}
@@ -587,6 +596,22 @@ export default function Canvas({
                     width: node.width,
                     height: node.height,
                     "--node-color": color(node.color),
+                    ...(node.type === "group" &&
+                    node.background &&
+                    /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(node.background)
+                      ? {
+                          backgroundImage: `url("${assetUrl(node.background)}")`,
+                          backgroundSize:
+                            node.backgroundStyle === "repeat"
+                              ? "auto"
+                              : node.backgroundStyle === "ratio"
+                                ? "contain"
+                                : "cover",
+                          backgroundRepeat:
+                            node.backgroundStyle === "repeat" ? "repeat" : "no-repeat",
+                          backgroundPosition: "center",
+                        }
+                      : {}),
                   } as React.CSSProperties
                 }
                 onClick={(e) => {
@@ -656,16 +681,29 @@ export default function Canvas({
                     )}
                   </span>
                   {node.type === "file" && (
-                    <button title="Открыть файл" onClick={() => onOpen(node.file)}>
+                    <button title="Открыть файл" onClick={() => onOpen(node.file, "")}>
                       <FileText size={16} />
                     </button>
                   )}
                 </div>
                 {node.type === "text" &&
-                  (readOnly ? (
-                    <div className="canvas-text-preview">
+                  (readOnly || editing !== node.id ? (
+                    <div
+                      className="canvas-text-preview"
+                      title={readOnly ? undefined : "Двойной щелчок для редактирования"}
+                      onDoubleClick={(event) => {
+                        if (
+                          !readOnly &&
+                          !connect &&
+                          !(event.target as HTMLElement).closest("button,a,input")
+                        ) {
+                          event.stopPropagation();
+                          setEditing(node.id);
+                        }
+                      }}
+                    >
                       <Markdown
-                        content={node.text}
+                        content={node.text || "Текст карточки…"}
                         path={path}
                         index={index}
                         onLink={onOpen}
@@ -676,6 +714,17 @@ export default function Canvas({
                       aria-label="Текст карточки"
                       placeholder="Текст карточки…"
                       value={node.text}
+                      autoFocus
+                      onBlur={() =>
+                        setEditing((current) => (current === node.id ? null : current))
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.stopPropagation();
+                          setEditing(null);
+                          host.current?.focus();
+                        }
+                      }}
                       onPointerDown={(e) => e.stopPropagation()}
                       onChange={(e) =>
                         commit({

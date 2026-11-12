@@ -1013,6 +1013,33 @@ kbd {
   z-index: 12;
   box-shadow: 0 4px 18px #0003;
   white-space: nowrap;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.canvas-options {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding: 6px 4px 2px;
+}
+.canvas-options label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.canvas-options input,
+.canvas-options select {
+  font-size: 12px;
+  max-width: 180px;
+  padding: 4px 6px;
 }
 .canvas-topbar > button {
   padding: 8px;
@@ -1045,6 +1072,7 @@ kbd {
 }
 .canvas-node {
   position: absolute;
+  z-index: 2;
   border: 1px solid color-mix(in srgb, var(--node-color) 55%, var(--border));
   border-radius: var(--r-md);
   background: var(--panel);
@@ -1093,6 +1121,7 @@ kbd {
   outline: none;
 }
 .canvas-node.group {
+  z-index: 0;
   background: transparent;
   overflow: visible;
   border-style: dashed;
@@ -1160,6 +1189,7 @@ kbd {
 }
 .canvas-edges {
   position: absolute;
+  z-index: 1;
   overflow: visible;
   left: 0;
   top: 0;
@@ -2799,9 +2829,27 @@ h3,
   gap: 8px;
 }
 .canvas-text-preview {
-  padding: 12px;
+  padding: 8px 16px 16px;
   overflow: auto;
   height: calc(100% - 28px);
+}
+.canvas-text-preview .markdown {
+  font-family: var(--note-font);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.canvas-text-preview .markdown h1 {
+  font-size: 1.5em;
+}
+.canvas-text-preview .markdown h2 {
+  font-size: 1.25em;
+}
+.canvas-text-preview .markdown > :first-child {
+  margin-top: 0;
+}
+.canvas-node.group[style*="background-image"] .group-label {
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--text);
 }
 
 .embed-content.embed-note {

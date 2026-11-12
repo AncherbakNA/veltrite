@@ -188,7 +188,7 @@ export default function Embedded({
                 readOnly
                 onChange={() => {}}
                 index={index}
-                onOpen={(path) => navigate(path, "")}
+                onOpen={(link, source = resolved) => navigate(link, source)}
                 onChooseFile={() => {}}
                 onChooseLink={() => {}}
               />

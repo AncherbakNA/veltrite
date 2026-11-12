@@ -325,7 +325,7 @@ export default function App() {
           await new Promise<void>((resolve, reject) => {
             const navigate = () => {
               const viewer = [
-                ...document.querySelectorAll<HTMLElement>(".pdf-viewer"),
+                ...document.querySelectorAll<HTMLElement>(".document-leaf > .pdf-viewer"),
               ].find(
                 (element) =>
                   element.dataset.pdfPath === resolved &&
