@@ -557,12 +557,16 @@ test("запуск с главной сохраняет вкладки и нас
   await page.getByRole("button", { name: "Настройки", exact: true }).click();
   await page.getByLabel("При запуске открывать").selectOption("home");
   await expect
-    .poll(
-      async () =>
-        JSON.parse(
-          await fs.readFile(path.join(root, ".veltrite/preferences.json"), "utf8"),
-        ).startupView,
-    )
+    .poll(async () => {
+      try {
+        return JSON.parse(
+          await fs.readFile(path.join(root, ".veltrite", "preferences.json"), "utf8"),
+        ).startupView;
+      } catch (error: any) {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      }
+    })
     .toBe("home");
   await page.getByLabel("Шрифт текста", { exact: true }).selectOption("sans");
   await expect(page.locator("html")).toHaveAttribute("data-text-font", "sans");

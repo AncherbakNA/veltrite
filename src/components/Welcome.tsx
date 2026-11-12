@@ -1,4 +1,4 @@
-import { ChevronRight, FolderOpen, Import, Plus } from "lucide-react";
+import { FolderOpen, Import, Plus } from "lucide-react";
 import BrandMark from "./BrandMark";
 interface WelcomeProps {
   recent: { root: string; name: string }[];
@@ -24,28 +24,22 @@ export default function Welcome({
         <p>Заметки, холсты и базы в локальной папке.</p>
         <div className="welcome-actions">
           <button className="welcome-action primary" onClick={onCreate}>
-            <Plus size={18} />
+            <Plus size={16} />
             <span>
               <strong>Создать хранилище</strong>
-              <small>Выбрать папку для новых заметок</small>
             </span>
-            <ChevronRight size={16} />
           </button>
           <button className="welcome-action" onClick={onOpen}>
-            <FolderOpen size={18} />
+            <FolderOpen size={16} />
             <span>
               <strong>Открыть папку</strong>
-              <small>Открыть существующие файлы</small>
             </span>
-            <ChevronRight size={16} />
           </button>
           <button className="welcome-action" onClick={onImport}>
-            <Import size={18} />
+            <Import size={16} />
             <span>
               <strong>Импорт из папки</strong>
-              <small>Скопировать заметки и вложения</small>
             </span>
-            <ChevronRight size={16} />
           </button>
         </div>
         {!!recent.length && (
@@ -58,7 +52,6 @@ export default function Welcome({
                   {item.name}
                   <small>{item.root}</small>
                 </span>
-                <ChevronRight size={15} />
               </button>
             ))}
           </div>

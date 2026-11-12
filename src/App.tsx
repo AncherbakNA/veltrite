@@ -1018,7 +1018,7 @@ export default function App() {
                         <Clock3 size={14} />
                         <span>
                           {new Date(item.at).toLocaleString("ru-RU")}
-                          <small>{item.size} байт</small>
+                          <small>{plural(item.size, ["байт", "байта", "байт"])}</small>
                         </span>
                       </button>
                       <button
