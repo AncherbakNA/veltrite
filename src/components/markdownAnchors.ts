@@ -1,4 +1,4 @@
-import { headingId } from "../../shared/markdown-blocks";
+import { headingSlugger, noteHeadings } from "../../shared/markdown-blocks";
 
 const textOf = (node: any): string =>
   typeof node.value === "string"
@@ -7,8 +7,14 @@ const textOf = (node: any): string =>
 
 /** IDs are attached to parsed blocks; note HTML never becomes executable markup. */
 export function markdownAnchors() {
-  return (tree: any) => {
-    const headings = new Map<string, number>(),
+  return (tree: any, file: { value?: unknown }) => {
+    const sourceHeadings = new Map(
+        noteHeadings(String(file.value || "")).map((heading) => [
+          heading.line,
+          heading.id,
+        ]),
+      ),
+      slug = headingSlugger(),
       blocks = new Set<string>();
     const assign = (node: any, id: string) => {
       if (blocks.has(id)) return;
@@ -25,14 +31,12 @@ export function markdownAnchors() {
         const node = parent.children[i];
         walk(node);
         if (node.type === "heading") {
-          const slug = headingId(textOf(node)),
-            count = (headings.get(slug) || 0) + 1;
-          headings.set(slug, count);
+          const id = sourceHeadings.get(node.position?.start?.line) || slug(textOf(node));
           node.data = {
             ...node.data,
             hProperties: {
               ...node.data?.hProperties,
-              id: count === 1 ? slug : slug + "-" + count,
+              id,
             },
           };
         }

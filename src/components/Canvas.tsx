@@ -263,7 +263,7 @@ export default function Canvas({
       canvasVisibility(
         data,
         viewport(transform, size.width, size.height),
-        new Set(selected),
+        new Set(selected.length === 1 ? selected : []),
       ),
     [data, transform, size, selected],
   );

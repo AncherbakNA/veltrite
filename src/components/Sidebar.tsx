@@ -102,7 +102,7 @@ export default function Sidebar({
     return vault.files.filter(
       (file) =>
         (filter === "all" || file.kind === filter || parents.has(file.path)) &&
-        ![...collapsed].some((folder) => file.path.startsWith(folder + "/")),
+        !hasCollapsedParent(file.path, collapsed),
     );
   }, [vault.files, filter, collapsed]);
   const fileCount = useMemo(
@@ -605,4 +605,14 @@ export default function Sidebar({
       </div>
     </aside>
   );
+}
+
+function hasCollapsedParent(path: string, collapsed: Set<string>) {
+  let separator = path.lastIndexOf("/");
+  while (separator >= 0) {
+    const parent = path.slice(0, separator);
+    if (collapsed.has(parent)) return true;
+    separator = parent.lastIndexOf("/");
+  }
+  return false;
 }

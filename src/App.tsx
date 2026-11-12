@@ -4,9 +4,19 @@ import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { plural } from "../shared/format";
 import { linkResolver } from "../shared/graph";
 import { frontmatter, indexNote, resolveLink } from "../shared/markdown";
-import { headingId, referenceBlocks } from "../shared/markdown-blocks";
+import {
+  decodeFragment,
+  findHeading,
+  noteHeadings,
+  referenceBlocks,
+} from "../shared/markdown-blocks";
 import { leaves } from "../shared/panes";
-import { readableAccent, themeTokens } from "../shared/themes";
+import {
+  accentButtonText,
+  accentForTheme,
+  readableAccent,
+  themeTokens,
+} from "../shared/themes";
 import type { HistoryItem, PluginInfo, Preferences } from "../shared/types";
 import { VaultFilesContext } from "./VaultContext";
 import { buildCommands } from "./commands";
@@ -27,6 +37,7 @@ import Sidebar, { type FileFilter } from "./components/Sidebar";
 import Welcome from "./components/Welcome";
 import WindowTabs from "./components/WindowTabs";
 import WorkspaceHome from "./components/WorkspaceHome";
+import { insertIntoEditor } from "./editorInsertion";
 import { scrollToNoteAnchor } from "./navigation";
 import { api, useVault } from "./useVault";
 const Graph = lazy(() => import("./components/Graph"));
@@ -71,6 +82,8 @@ export default function App() {
     [palette, setPalette] = useState<{
       commands: Command[];
       placeholder?: string;
+      scope?: "commands";
+      onPick?: () => void;
     } | null>(null),
     [dialog, setDialog] = useState<DialogData | null>(null),
     [selection, setSelection] = useState(""),
@@ -111,12 +124,25 @@ export default function App() {
           document.documentElement.style.setProperty("--" + token, colors[token]);
         else document.documentElement.style.removeProperty("--" + token);
       }
-      if (colors)
-        document.documentElement.style.setProperty(
-          "--accent-ink",
-          readableAccent(preferences.accent, colors),
-        );
-      else document.documentElement.style.removeProperty("--accent-ink");
+      const accent = accentForTheme(preferences.accent, dark);
+      document.documentElement.style.setProperty("--accent", accent);
+      const computed = getComputedStyle(document.documentElement);
+      const palette =
+        colors ||
+        (Object.fromEntries(
+          themeTokens.map((token) => [
+            token,
+            computed.getPropertyValue("--" + token).trim(),
+          ]),
+        ) as import("../shared/themes").ThemeColors);
+      document.documentElement.style.setProperty(
+        "--accent-ink",
+        readableAccent(accent, palette),
+      );
+      document.documentElement.style.setProperty(
+        "--accent-button-text",
+        accentButtonText(accent),
+      );
     };
     applyTheme();
     system.addEventListener("change", applyTheme);
@@ -124,20 +150,7 @@ export default function App() {
       "--editor-size",
       preferences.fontSize + "px",
     );
-    document.documentElement.style.setProperty("--accent", preferences.accent);
     document.documentElement.dataset.textFont = preferences.textFont;
-    const rgb = preferences.accent
-      .slice(1)
-      .match(/../g)!
-      .map((part) => {
-        const n = parseInt(part, 16) / 255;
-        return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
-      });
-    const luminance = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
-    document.documentElement.style.setProperty(
-      "--accent-button-text",
-      luminance > 0.179 ? "#000000" : "#ffffff",
-    );
     return () => system.removeEventListener("change", applyTheme);
   }, [preferences]);
   useEffect(() => api().onMenu((action) => actionRef.current(action)), []);
@@ -230,20 +243,10 @@ export default function App() {
           workspace.edit(draft.path, draft.content + action.text);
           return;
         }
-        workspace.setPaneMode((previous) => (previous === "read" ? "live" : previous));
-        setTimeout(
-          () =>
-            window.dispatchEvent(
-              new CustomEvent("veltrite:insert", {
-                detail: {
-                  path: draft.path,
-                  paneId: workspace.activePane,
-                  text: action.text,
-                },
-              }),
-            ),
-          60,
-        );
+        void run(async () => {
+          workspace.setPaneMode((previous) => (previous === "read" ? "live" : previous));
+          await insertIntoEditor(draft.path, workspace.activePane, action.text);
+        });
       }),
     [message, error, workspace.edit, workspace.activePane],
   );
@@ -297,22 +300,18 @@ export default function App() {
     if (resolved)
       run(async () => {
         await open(resolved, paneId);
-        const subpath = target.split("#")[1];
+        const subpath = decodeFragment(target);
         if (!subpath) return;
         const tab = tabs.find((t) => t.path === resolved),
           text = tab?.content || (await api().read(resolved)).content;
-        const heading = indexNote(resolved, text).headings.find(
-          (h) =>
-            h.text.toLocaleLowerCase() === subpath.toLocaleLowerCase() ||
-            headingId(h.text) === headingId(subpath),
-        );
+        const heading = findHeading(noteHeadings(text), subpath);
         const block = subpath.startsWith("^")
           ? referenceBlocks(text).find((item) => item.id === subpath.slice(1))
           : null;
         setTimeout(() => {
           scrollToNoteAnchor(
             resolved,
-            subpath.startsWith("^") ? "block-" + subpath.slice(1) : headingId(subpath),
+            subpath.startsWith("^") ? "block-" + subpath.slice(1) : heading?.id || "",
             paneId,
           );
           if (heading || block)
@@ -323,14 +322,6 @@ export default function App() {
             );
         }, 60);
       });
-    else if (target.startsWith("#"))
-      document
-        .getElementById(target.slice(1).toLowerCase().replace(/\s/g, "-"))
-        ?.scrollIntoView({
-          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-            ? "auto"
-            : "smooth",
-        });
     else newFile("note", target.split("#")[0]);
   };
   const sync = () =>
@@ -353,9 +344,14 @@ export default function App() {
         setSyncing(false);
       }
     });
-  const chooseVault = async (create = false) => {
-    setSettings(false);
+  const flushForVaultChange = async () => {
+    if (recording || audioSave.current)
+      throw Error("Завершите запись и дождитесь сохранения аудио перед сменой хранилища");
     await workspace.flush();
+  };
+  const chooseVault = async (create = false) => {
+    await flushForVaultChange();
+    setSettings(false);
     const selected = await api().chooseVault(create);
     if (selected) {
       await workspace.switchVault(selected);
@@ -367,8 +363,8 @@ export default function App() {
   };
   const importVault = () =>
     run(async () => {
+      await flushForVaultChange();
       setSettings(false);
-      await workspace.flush();
       const result = await api().importFolder();
       if (result) {
         await workspace.switchVault(result.vault);
@@ -538,16 +534,18 @@ export default function App() {
   const pluginCommands: Command[] = installedPlugins
     .filter((p) => p.enabled)
     .flatMap((p) =>
-      p.commands.map((c) => ({
-        id: p.id + ":" + c.id,
-        name: p.name + ": " + c.name,
-        run: () => {
-          if (c.action === "execute") run(() => api().executePlugin(p.id, c.id));
-          if (c.action === "insert") insert(c.value || "");
-          if (c.action === "open-url") run(() => api().openExternal(c.value || ""));
-          if (c.action === "create") newFile("note", c.value);
-        },
-      })),
+      p.commands
+        .filter((command) => !p.main || p.registeredCommands?.includes(command.id))
+        .map((c) => ({
+          id: p.id + ":" + c.id,
+          name: p.name + ": " + c.name,
+          run: () => {
+            if (c.action === "execute") run(() => api().executePlugin(p.id, c.id));
+            if (c.action === "insert") insert(c.value || "");
+            if (c.action === "open-url") run(() => api().openExternal(c.value || ""));
+            if (c.action === "create") newFile("note", c.value);
+          },
+        })),
     );
   useEffect(() => {
     const refresh = () =>
@@ -573,7 +571,7 @@ export default function App() {
       return;
     }
     if (action === "commands") {
-      setPalette({ commands: [...commands, ...pluginCommands] });
+      setPalette({ commands: [], scope: "commands" });
       return;
     }
     if (action === "toggle-reading") {
@@ -752,7 +750,7 @@ export default function App() {
                       key={r.root}
                       onClick={() =>
                         run(async () => {
-                          await workspace.flush();
+                          await flushForVaultChange();
                           await workspace.switchVault(await api().openRecent(r.root));
                           setRecentOpen(false);
                         })
@@ -833,11 +831,9 @@ export default function App() {
                               openLink={openLink}
                               bookmark={bookmark}
                               commands={commands}
-                              pluginCommands={pluginCommands}
                               setDialog={setDialog}
                               setPalette={setPalette}
                               setSelection={setSelection}
-                              onAction={(id) => actionRef.current(id)}
                               canGoBack={historyPosition.current > 0}
                               onBack={() => {
                                 if (historyPosition.current > 0) {
@@ -1002,7 +998,17 @@ export default function App() {
         )}
         {palette && (
           <CommandPalette
-            commands={palette.commands}
+            commands={
+              palette.scope === "commands"
+                ? [...commands, ...pluginCommands].map((command) => ({
+                    ...command,
+                    run: () => {
+                      palette.onPick?.();
+                      setTimeout(() => command.run(), 0);
+                    },
+                  }))
+                : palette.commands
+            }
             placeholder={palette.placeholder}
             onClose={() => setPalette(null)}
           />

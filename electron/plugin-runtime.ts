@@ -25,6 +25,9 @@ interface Instance {
   commands: Set<string>;
   events: Set<string>;
   stopping: boolean;
+  active: boolean;
+  activeRequests: number;
+  rate: { start: number; count: number };
   ready: Promise<void>;
   acceptReady: () => void;
   rejectReady: (error: Error) => void;
@@ -96,6 +99,9 @@ export class PluginRuntime {
       commands: new Set(),
       events: new Set(),
       stopping: false,
+      active: false,
+      activeRequests: 0,
+      rate: { start: Date.now(), count: 0 },
       ready,
       acceptReady,
       rejectReady,
@@ -194,11 +200,33 @@ export class PluginRuntime {
       input.length > 3
     )
       throw Error("Недопустимый запрос расширения");
-    const args = input;
+    const now = Date.now();
+    if (now - instance.rate.start >= 1000) instance.rate = { start: now, count: 0 };
+    if (++instance.rate.count > 300 || instance.activeRequests >= 16)
+      throw Error("Слишком много запросов расширения");
+    instance.activeRequests++;
+    try {
+      return await this.dispatch(instance, method, input);
+    } finally {
+      instance.activeRequests--;
+    }
+  }
+  registeredCommands(id: string) {
+    const instance = this.instances.get(id);
+    return instance && instance.active && !instance.stopping
+      ? [...instance.commands]
+      : [];
+  }
+  private async dispatch(
+    instance: Instance,
+    method: unknown,
+    args: unknown[],
+  ): Promise<unknown> {
     if (instance.stopping && method !== "storage.set")
       throw Error("Расширение отключено");
     switch (method) {
       case "ready":
+        instance.active = true;
         instance.acceptReady();
         return;
       case "failed":
@@ -209,8 +237,13 @@ export class PluginRuntime {
         if (!instance.plugin.commands.some((command) => command.id === id))
           throw Error("Команда не объявлена в манифесте");
         instance.commands.add(id);
+        if (instance.active) this.host.pluginsChanged();
         return;
       }
+      case "commands.unregister":
+        instance.commands.delete(string(args[0], 80));
+        if (instance.active) this.host.pluginsChanged();
+        return;
       case "vault.list":
         this.permission(instance, "vault.read");
         return this.host.vault().list();
@@ -224,8 +257,11 @@ export class PluginRuntime {
           revision = string(args[2], 64);
         if (!/^[a-f0-9]{64}$/.test(revision))
           throw Error("Перед правкой прочитайте текущую ревизию файла");
+        const vault = this.host.vault();
         return this.host.serial.run(async () => {
-          const result = await this.host.vault().write(file, content, revision);
+          if (instance.stopping || this.host.vault() !== vault)
+            throw Error("Хранилище изменилось до выполнения правки");
+          const result = await vault.write(file, content, revision);
           this.host.changed();
           return result;
         });
@@ -234,8 +270,11 @@ export class PluginRuntime {
         this.permission(instance, "vault.write");
         const file = string(args[0]),
           content = string(args[1], 1024 * 1024);
+        const vault = this.host.vault();
         return this.host.serial.run(async () => {
-          const result = await this.host.vault().create(file, content);
+          if (instance.stopping || this.host.vault() !== vault)
+            throw Error("Хранилище изменилось до создания файла");
+          const result = await vault.create(file, content);
           this.host.changed();
           return result;
         });

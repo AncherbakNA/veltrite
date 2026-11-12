@@ -94,3 +94,21 @@ test("изменённый пакет не устанавливается, не�
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("медный акцент адаптируется к теме, подписи кнопок сохраняют контраст", async () => {
+  const { DEFAULT_ACCENT, LIGHT_ACCENT, accentForTheme, accentButtonText } =
+    await import("../shared/themes");
+  expect(accentForTheme(DEFAULT_ACCENT, true)).toBe(DEFAULT_ACCENT);
+  expect(accentForTheme(DEFAULT_ACCENT, false)).toBe(LIGHT_ACCENT);
+  expect(accentForTheme("#426b50", false)).toBe("#426b50");
+  for (const color of [
+    DEFAULT_ACCENT,
+    LIGHT_ACCENT,
+    "#74805a",
+    "#a77d68",
+    "#8f734f",
+    "#8a6e74",
+    "#717b7a",
+  ])
+    expect(contrast(color, accentButtonText(color))).toBeGreaterThanOrEqual(4.5);
+});

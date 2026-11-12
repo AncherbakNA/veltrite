@@ -11,8 +11,8 @@
   --text: #e7e5e0;
   --muted: #b2afa7;
   --faint: #a29e96;
-  --accent: #c0603a;
-  --accent-ink: color-mix(in srgb, var(--accent) 68%, white);
+  --accent: #b99871;
+  --accent-ink: #b99871;
   --accent-button-text: #000;
   --green: #a4bea0;
   --red: #eca397;
@@ -34,7 +34,8 @@
   color-scheme: dark;
 }
 :root[data-theme="light"] {
-  --accent-ink: color-mix(in srgb, var(--accent) 80%, #24221f);
+  --accent: #806342;
+  --accent-ink: #806342;
   --bg: #fbfaf7;
   --panel: #f5f3ee;
   --sidebar: #f1eee8;
@@ -107,8 +108,8 @@ button.primary:hover {
   filter: brightness(1.08);
 }
 button.danger {
-  background: #a94358;
-  color: white;
+  background: var(--red);
+  color: var(--bg);
 }
 .danger-text {
   color: var(--red) !important;
@@ -478,8 +479,8 @@ kbd {
   gap: 0px;
 }
 .save-error {
-  background: #a9435820;
-  border-block: 1px solid #a9435870;
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  border-block: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
   color: var(--red);
   padding: 8px 20px;
   display: flex;
@@ -513,7 +514,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #08080e9c;
+  background: #00000080;
   backdrop-filter: blur(5px);
 }
 .modal {
@@ -735,7 +736,7 @@ kbd {
 }
 .toggle-row input:checked:before {
   transform: translateX(13px);
-  background: #282130;
+  background: var(--accent-button-text);
 }
 .field-label {
   display: block;
@@ -757,8 +758,8 @@ kbd {
   display: flex;
   gap: 12px;
   align-items: center;
-  background: #9fc8ae08;
-  border: 1px solid #9fc8ae25;
+  background: color-mix(in srgb, var(--green) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 15%, transparent);
   padding: 16px;
   border-radius: var(--r-md);
   color: var(--green);
@@ -846,7 +847,7 @@ kbd {
   z-index: 300;
   max-width: 600px;
   background: var(--panel);
-  border: 1px solid #9fc8ae55;
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
   border-radius: var(--r-md);
   padding: 12px 16px;
   display: flex;
@@ -864,7 +865,7 @@ kbd {
   overflow-wrap: anywhere;
 }
 .toast.error {
-  border-color: #ea929c66;
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
   color: var(--red);
 }
 .toast.error > span {
@@ -1353,7 +1354,7 @@ kbd {
   cursor: pointer;
 }
 .graph-node circle {
-  fill: #a5a0b9;
+  fill: var(--muted);
   stroke: var(--bg);
   stroke-width: 4;
 }
@@ -1384,7 +1385,7 @@ kbd {
 .graph-legend i {
   width: 6px;
   height: 6px;
-  background: #a5a0b9;
+  background: var(--muted);
   border-radius: var(--r-lg);
   margin-left: 8px;
 }

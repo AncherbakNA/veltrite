@@ -78,6 +78,20 @@ if (task === "check") run("node_modules/typescript/lib/tsc.js", ["--noEmit"]);
 else if (task === "test") {
   await bundleSearch();
   run("node_modules/vitest/vitest.mjs", ["run"]);
+} else if (task === "soak") {
+  run("scripts/soak.mjs");
+} else if (task === "benchmark") {
+  await bundleSearch();
+  mkdirSync("../benchmarks", { recursive: true });
+  await build({
+    entryPoints: ["scripts/benchmark.ts"],
+    outfile: "../benchmarks/runner.cjs",
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    target: "node22",
+  });
+  run("../benchmarks/runner.cjs");
 } else if (task === "format") {
   run("scripts/organize.mjs");
   const marker = JSON.parse(readFileSync(".veltrite-workspace.json", "utf8"));

@@ -110,41 +110,60 @@ export function useVault(onError: (message: string) => void) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
-  const refresh = useCallback(async () => {
-    if (!stateRef.current?.vault) return;
-    const [fresh, notes] = await Promise.all([api().state(), api().index()]);
-    if (fresh.vault?.root !== stateRef.current?.vault?.root) return;
-    const files = fresh.vault!.files;
-    setIndex(notes);
-    setState(fresh);
-    for (const tab of ref.current) {
-      if (tab.dirty || saves.current.has(tab.path)) continue;
-      if (!files.some((f) => f.path === tab.path)) continue;
-      try {
-        const disk = await api().read(tab.path);
-        if (disk.revision !== tab.revision)
-          set((list) =>
-            list.map((t) =>
-              t.path === disk.path && !t.dirty
-                ? {
-                    ...disk,
-                    savedContent: disk.content,
-                    dirty: false,
-                    error: null,
-                  }
-                : t,
-            ),
-          );
-      } catch {}
-    }
+  const epoch = useRef(0),
+    refreshPending = useRef<Promise<void> | null>(null),
+    refreshRequested = useRef(false);
+  const refresh = useCallback((): Promise<void> => {
+    refreshRequested.current = true;
+    if (refreshPending.current) return refreshPending.current;
+    const pending = (async () => {
+      do {
+        refreshRequested.current = false;
+        const root = stateRef.current?.vault?.root,
+          generation = epoch.current;
+        if (!root) continue;
+        const [fresh, notes] = await Promise.all([api().state(), api().index()]);
+        const valid = () =>
+          generation === epoch.current && stateRef.current?.vault?.root === root;
+        if (!valid() || fresh.vault?.root !== root) continue;
+        const paths = new Set(fresh.vault.files.map((file) => file.path));
+        setIndex(notes);
+        stateRef.current = fresh;
+        setState(fresh);
+        for (const tab of ref.current) {
+          if (!valid()) break;
+          if (tab.dirty || saves.current.has(tab.path) || !paths.has(tab.path)) continue;
+          try {
+            const disk = await api().read(tab.path);
+            if (!valid()) break;
+            if (disk.revision !== tab.revision)
+              set((list) =>
+                list.map((current) =>
+                  current.path === disk.path &&
+                  !current.dirty &&
+                  current.revision === tab.revision &&
+                  !saves.current.has(current.path)
+                    ? { ...disk, savedContent: disk.content, dirty: false, error: null }
+                    : current,
+                ),
+              );
+          } catch {}
+        }
+      } while (refreshRequested.current);
+    })().finally(() => {
+      if (refreshPending.current === pending) refreshPending.current = null;
+    });
+    refreshPending.current = pending;
+    return pending;
   }, [set]);
   useEffect(() => {
     let alive = true;
+    const generation = epoch.current;
     api()
       .state()
       .then(async (value) => {
         const restored = await restoreSession(value);
-        if (!alive) return;
+        if (!alive || generation !== epoch.current) return;
         set(() => restored);
         restoreLayout(
           value.session,
@@ -152,7 +171,13 @@ export function useVault(onError: (message: string) => void) {
         );
         stateRef.current = value;
         setState(value);
-        if (value.vault) api().index().then(setIndex);
+        if (value.vault)
+          api()
+            .index()
+            .then((notes) => {
+              if (alive && generation === epoch.current) setIndex(notes);
+            })
+            .catch((e) => onError(e.message));
       })
       .catch((e) => onError(String(e.message)));
     const off = api().onChange(() => {
@@ -166,13 +191,13 @@ export function useVault(onError: (message: string) => void) {
   const sessionPaths = JSON.stringify(tabs.map((t) => t.path));
   useEffect(() => {
     if (!state?.vault) return;
-    const timer = setTimeout(
-      () =>
+    const root = state.vault.root;
+    const timer = setTimeout(() => {
+      if (stateRef.current?.vault?.root === root)
         api()
           .saveSession(sessionData())
-          .catch(() => {}),
-      350,
-    );
+          .catch(() => {});
+    }, 350);
     return () => clearTimeout(timer);
   }, [state?.vault?.root, sessionPaths, layout, activePane, sessionData]);
   const save = useCallback(
@@ -246,8 +271,10 @@ export function useVault(onError: (message: string) => void) {
   );
   const open = useCallback(
     async (path: string, paneId?: string) => {
+      const generation = epoch.current;
       if (!ref.current.some((t) => t.path === path)) {
         const data = await api().read(path);
+        if (generation !== epoch.current) return;
         set((list) =>
           list.some((t) => t.path === path)
             ? list
@@ -285,6 +312,9 @@ export function useVault(onError: (message: string) => void) {
   );
   const switchVault = useCallback(
     async (value: VaultInfo) => {
+      const generation = ++epoch.current;
+      stateRef.current = null;
+      setIndex([]);
       for (const timer of timers.current.values()) clearTimeout(timer);
       timers.current.clear();
       set(() => []);
@@ -293,6 +323,7 @@ export function useVault(onError: (message: string) => void) {
       if (fresh.vault?.root !== value.root)
         throw Error("Хранилище изменилось во время открытия. Повторите выбор папки.");
       const restored = await restoreSession(fresh);
+      if (generation !== epoch.current) return;
       set(() => restored);
       restoreLayout(
         fresh.session,
@@ -300,7 +331,8 @@ export function useVault(onError: (message: string) => void) {
       );
       stateRef.current = fresh;
       setState(fresh);
-      setIndex(await api().index());
+      const notes = await api().index();
+      if (generation === epoch.current) setIndex(notes);
     },
     [set, restoreLayout, setLayout],
   );

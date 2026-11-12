@@ -1,7 +1,8 @@
 import { FileText, PanelsTopLeft, Plus, Search, Table2 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { FileEntry, NoteIndex } from "../../shared/types";
 import { fileTitle } from "../ui";
+import Pagination, { usePagination } from "./Pagination";
 import type { FileFilter } from "./Sidebar";
 interface FileCollectionProps {
   kind: FileFilter;
@@ -24,25 +25,33 @@ export default function FileCollection({
   onCreate,
 }: FileCollectionProps) {
   const [query, setQuery] = useState("");
-  const info = collections[kind],
-    notes = new Map(index.map((note) => [note.path, note]));
-  const matching = files.filter(
-    (file) =>
-      ["note", "canvas", "base"].includes(file.kind) &&
-      (kind === "all" || file.kind === kind),
+  const info = collections[kind];
+  const notes = useMemo(() => new Map(index.map((note) => [note.path, note])), [index]);
+  const matching = useMemo(
+    () =>
+      files.filter(
+        (file) =>
+          ["note", "canvas", "base"].includes(file.kind) &&
+          (kind === "all" || file.kind === kind),
+      ),
+    [files, kind],
   );
-  const results = matching
-    .filter((file) =>
-      [
-        file.path,
-        notes.get(file.path)?.title || "",
-        ...(notes.get(file.path)?.tags || []),
-      ]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(query.toLocaleLowerCase()),
-    )
-    .sort((a, b) => b.modified - a.modified);
+  const results = useMemo(() => {
+    const needle = query.toLocaleLowerCase();
+    return matching
+      .filter((file) =>
+        [
+          file.path,
+          notes.get(file.path)?.title || "",
+          ...(notes.get(file.path)?.tags || []),
+        ]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(needle),
+      )
+      .sort((a, b) => b.modified - a.modified);
+  }, [matching, query, notes]);
+  const pagination = usePagination(results.length, kind + ":" + query);
   return (
     <section className="file-collection">
       <div className="collection-heading">
@@ -64,6 +73,7 @@ export default function FileCollection({
           />
         </label>
       </div>
+      <Pagination {...pagination} />
       {results.length ? (
         <table className="collection-table">
           <thead>
@@ -74,52 +84,54 @@ export default function FileCollection({
             </tr>
           </thead>
           <tbody>
-            {results.map((file) => {
-              const Icon =
-                file.kind === "canvas"
-                  ? PanelsTopLeft
-                  : file.kind === "base"
-                    ? Table2
-                    : FileText;
-              return (
-                <tr
-                  key={file.path}
-                  className={"collection-row kind-" + file.kind}
-                  onClick={() => onOpen(file.path)}
-                >
-                  <td>
-                    <button
-                      className="collection-open"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onOpen(file.path);
-                      }}
-                      title={file.path}
-                    >
-                      <Icon size={16} />
-                      {fileTitle(file.path)}
-                    </button>
-                  </td>
-                  <td>
-                    {file.path.includes("/")
-                      ? file.path.split("/").slice(0, -1).join(" / ")
-                      : "—"}
-                  </td>
-                  <td>
-                    <time
-                      dateTime={new Date(file.modified).toISOString()}
-                      title={new Date(file.modified).toLocaleString("ru-RU")}
-                    >
-                      {new Date(file.modified).toLocaleDateString("ru-RU", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </time>
-                  </td>
-                </tr>
-              );
-            })}
+            {results
+              .slice(pagination.start, pagination.start + pagination.size)
+              .map((file) => {
+                const Icon =
+                  file.kind === "canvas"
+                    ? PanelsTopLeft
+                    : file.kind === "base"
+                      ? Table2
+                      : FileText;
+                return (
+                  <tr
+                    key={file.path}
+                    className={"collection-row kind-" + file.kind}
+                    onClick={() => onOpen(file.path)}
+                  >
+                    <td>
+                      <button
+                        className="collection-open"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpen(file.path);
+                        }}
+                        title={file.path}
+                      >
+                        <Icon size={16} />
+                        {fileTitle(file.path)}
+                      </button>
+                    </td>
+                    <td>
+                      {file.path.includes("/")
+                        ? file.path.split("/").slice(0, -1).join(" / ")
+                        : "—"}
+                    </td>
+                    <td>
+                      <time
+                        dateTime={new Date(file.modified).toISOString()}
+                        title={new Date(file.modified).toLocaleString("ru-RU")}
+                      >
+                        {new Date(file.modified).toLocaleDateString("ru-RU", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </time>
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       ) : (

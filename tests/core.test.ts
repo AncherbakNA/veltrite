@@ -356,3 +356,37 @@ describe("Индекс и открытые форматы", () => {
     ).toThrow();
   });
 });
+
+it("кэш индекса и поиска видит внешнюю правку, удаление и переименование", async () => {
+  const root = path.join(temp, "cache");
+  await fs.mkdir(root);
+  await fs.writeFile(path.join(root, "Один.md"), "# Старое\nУникальный старый текст");
+  const vault = new Vault(root);
+  await vault.open();
+  await vault.index();
+  expect((await vault.search("Уникальный")).map((note) => note.path)).toEqual([
+    "Один.md",
+  ]);
+  await fs.writeFile(
+    path.join(root, "Один.md"),
+    "# Новое\nДругой новый текст, другая длина",
+  );
+  expect((await vault.search("Другой")).map((note) => note.path)).toEqual(["Один.md"]);
+  expect(await vault.search("Уникальный")).toEqual([]);
+  await vault.rename("Один.md", "Два.md");
+  expect((await vault.search("Другой")).map((note) => note.path)).toEqual(["Два.md"]);
+  await vault.trash("Два.md");
+  expect(await vault.search("Другой")).toEqual([]);
+});
+
+it("старый основной акцент заменяется медным, выбранный пользователем цвет сохраняется", async () => {
+  const root = path.join(temp, "appearance");
+  await fs.mkdir(root);
+  const vault = new Vault(root);
+  await vault.open();
+  await vault.setPreferences({ accent: "#c0603a" });
+  const updated = new Vault(root);
+  expect((await updated.open()).preferences.accent).toBe("#b99871");
+  await updated.setPreferences({ accent: "#74805a" });
+  expect((await new Vault(root).open()).preferences.accent).toBe("#74805a");
+});

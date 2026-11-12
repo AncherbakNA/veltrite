@@ -1,7 +1,7 @@
 import type { CatalogEntry, CatalogInfo } from "./catalog";
 import type { EditorContext, PluginAction, PluginPermission } from "./extensions";
 import type { WorkspaceSession } from "./panes";
-import type { ThemeDefinition } from "./themes";
+import { DEFAULT_ACCENT, type ThemeDefinition } from "./themes";
 import type { UpdateState } from "./updates";
 export type Theme = "dark" | "light" | "system";
 export interface Preferences {
@@ -36,7 +36,7 @@ export const defaultPreferences: Preferences = {
   autoSync: false,
   syncInterval: 300,
   readableLineLength: true,
-  accent: "#c0603a",
+  accent: DEFAULT_ACCENT,
   vimMode: false,
   bookmarks: [],
 };
@@ -174,6 +174,7 @@ export interface ImportResult {
   vault: VaultInfo;
 }
 export interface PluginInfo {
+  registeredCommands?: string[];
   main?: "main.js";
   apiVersion?: 1;
   permissions?: PluginPermission[];

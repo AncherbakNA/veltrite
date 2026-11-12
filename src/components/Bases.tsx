@@ -13,6 +13,7 @@ import { coordinates, summarize, summaryTypes } from "../../shared/summaries";
 import type { FileEntry, NoteIndex } from "../../shared/types";
 import { api } from "../useVault";
 import BaseMap from "./BaseMap";
+import Pagination, { usePagination } from "./Pagination";
 
 function PropertyCheckbox({
   value,
@@ -193,6 +194,11 @@ export default function Bases({
     if (Number.isInteger(view.limit) && view.limit > 0) rows = rows.slice(0, view.limit);
     return { rows, warnings: [...warnings] };
   }, [files, index, parsed, view, filter, sort, ascending]);
+  const pagination = usePagination(
+    rows.length,
+    JSON.stringify([viewIndex, view.type, filter, sort, ascending]),
+  );
+  const visibleRows = rows.slice(pagination.start, pagination.start + pagination.size);
   const get = (row: (typeof rows)[number], column: string) => {
     try {
       return display(row.evaluator.get(column));
@@ -324,13 +330,15 @@ export default function Bases({
   };
   const groupProperty = view.groupBy?.property || "note.status";
   const groups = new Map<string, typeof rows>();
-  for (const row of rows) {
+  for (const row of visibleRows) {
     const value = get(row, groupProperty);
     if (!groups.has(value)) groups.set(value, []);
     groups.get(value)!.push(row);
   }
   const groupOrder = Array.isArray(view.groupOrder)
-    ? view.groupOrder.map((v: unknown) => display(v))
+    ? view.groupOrder
+        .map((v: unknown) => display(v))
+        .filter((group: string) => groups.has(group) || rows.length <= pagination.size)
     : [...groups.keys()].sort((a, b) => a.localeCompare(b, "ru"));
   const changeSort = (column: string) => {
     const nextAscending = sort === column ? !ascending : true;
@@ -391,11 +399,12 @@ export default function Bases({
         </div>
       )}
       {error && <div className="save-error">{error}</div>}
+      {view.type !== "map" && <Pagination {...pagination} />}
       {view.type === "map" ? (
         <BaseMap points={mapPoints} onOpen={onOpen} />
       ) : view.type === "cards" || view.type === "list" ? (
         <div className={"base-cards " + (view.type === "list" ? "base-list" : "")}>
-          {rows.map((row) => (
+          {visibleRows.map((row) => (
             <article className="base-card" key={row.note.path}>
               <button className="base-card-title" onClick={() => onOpen(row.note.path)}>
                 <FileText size={17} />
@@ -513,7 +522,7 @@ export default function Bases({
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <tr key={row.note.path}>
                   {columns.map((column) => (
                     <td key={column}>{cell(row, column)}</td>

@@ -77,7 +77,7 @@ export default function DocumentToolbar({
           </button>
         )}
         <button
-          className={"icon-button " + (bookmarked ? "starred" : "")}
+          className={"icon-button pane-secondary " + (bookmarked ? "starred" : "")}
           aria-label="Закладка"
           aria-pressed={bookmarked}
           title={bookmarked ? "Убрать из закладок" : "Добавить в закладки"}
@@ -86,7 +86,7 @@ export default function DocumentToolbar({
           <Star size={16} />
         </button>
         <button
-          className="icon-button"
+          className="icon-button pane-secondary"
           title="Разделить вправо"
           aria-label="Разделить вправо"
           onClick={() => onSplit("row")}
@@ -94,7 +94,7 @@ export default function DocumentToolbar({
           <Columns2 size={16} />
         </button>
         <button
-          className="icon-button"
+          className="icon-button pane-secondary"
           title="Разделить вниз"
           aria-label="Разделить вниз"
           onClick={() => onSplit("column")}

@@ -18,7 +18,9 @@ export interface EditorContext {
 }
 export interface PluginAPI {
   readonly version: 1;
-  commands: { register(id: string, handler: () => unknown): Promise<() => void> };
+  commands: {
+    register(id: string, handler: () => unknown): Promise<() => Promise<void>>;
+  };
   vault: {
     list(): Promise<FileEntry[]>;
     read(path: string): Promise<Note>;

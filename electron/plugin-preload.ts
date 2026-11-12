@@ -1,8 +1,17 @@
 import { contextBridge, ipcRenderer } from "electron";
 const commands = new Map<string, () => unknown>(),
   disposers = new Set<() => unknown>();
-const call = (method: string, ...args: unknown[]) =>
-  ipcRenderer.invoke("veltrite-plugin:invoke", method, args);
+let activeRequests = 0;
+const call = async (method: string, ...args: unknown[]) => {
+  if (activeRequests >= 16)
+    throw Error("Расширение отправило слишком много одновременных запросов");
+  activeRequests++;
+  try {
+    return await ipcRenderer.invoke("veltrite-plugin:invoke", method, args);
+  } finally {
+    activeRequests--;
+  }
+};
 const subscribe = (name: string, callback: (value: unknown) => void) => {
   const listener = (_event: unknown, event: string, value: unknown) => {
     if (event === name) callback(value);
@@ -43,9 +52,19 @@ contextBridge.exposeInMainWorld("veltritePlugin", {
   commands: {
     register: async (id: string, handler: () => unknown) => {
       if (typeof handler !== "function") throw Error("Нужен обработчик команды");
-      await call("commands.register", id);
+      if (commands.has(id)) throw Error("Команда уже зарегистрирована");
       commands.set(id, handler);
-      return () => commands.delete(id);
+      try {
+        await call("commands.register", id);
+      } catch (error) {
+        commands.delete(id);
+        throw error;
+      }
+      return async () => {
+        if (commands.get(id) !== handler) return;
+        await call("commands.unregister", id);
+        commands.delete(id);
+      };
     },
   },
   vault: {

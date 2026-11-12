@@ -8,6 +8,7 @@ import { vim } from "@replit/codemirror-vim";
 import { minimalSetup } from "codemirror";
 import { useContext, useEffect, useRef } from "react";
 import type { NoteIndex, Preferences } from "../../shared/types";
+import { registerEditorInsertion } from "../editorInsertion";
 import { VaultFilesContext } from "../VaultContext";
 import { liveBlocks, refreshPreview, type PreviewData } from "./liveBlocks";
 import { livePreview } from "./livePreview";
@@ -252,26 +253,17 @@ export default function Editor({
     return () => window.removeEventListener("veltrite:goto", goto);
   }, []);
   useEffect(() => {
-    const insert = (event: Event) => {
-      const editor = view.current,
-        detail = (event as CustomEvent).detail;
-      if (
-        !editor ||
-        detail?.path !== previewData.current.path ||
-        detail.paneId !== paneId ||
-        typeof detail.text !== "string"
-      )
-        return;
+    return registerEditorInsertion(path, paneId || "main", (text) => {
+      const editor = view.current;
+      if (!editor) throw Error("Редактор закрыт");
       const { from, to } = editor.state.selection.main;
       editor.dispatch({
-        changes: { from, to, insert: detail.text },
-        selection: { anchor: from + detail.text.length },
+        changes: { from, to, insert: text },
+        selection: { anchor: from + text.length },
         scrollIntoView: true,
       });
       editor.focus();
-    };
-    window.addEventListener("veltrite:insert", insert);
-    return () => window.removeEventListener("veltrite:insert", insert);
+    });
   }, []);
   return (
     <div

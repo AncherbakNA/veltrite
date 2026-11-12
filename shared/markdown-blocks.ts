@@ -202,6 +202,7 @@ export function referenceBlocks(source: string): ReferenceBlock[] {
 
 export function headingId(text: string) {
   return text
+    .replace(/\s+\^[\p{L}\p{N}_-]+\s*$/u, "")
     .replace(
       /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
       (_all, target, label) => label || target,
@@ -214,37 +215,104 @@ export function headingId(text: string) {
     .replace(/\s+/g, "-");
 }
 
+export function decodeFragment(target: string) {
+  if (!target.includes("#")) return "";
+  const fragment = target.slice(target.indexOf("#") + 1).split("|")[0];
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+/** A global set also avoids collisions with literal headings such as Foo-2. */
+export function headingSlugger() {
+  const used = new Set<string>();
+  return (text: string) => {
+    const base = headingId(text) || "section";
+    let id = base,
+      suffix = 2;
+    while (used.has(id)) id = base + "-" + suffix++;
+    used.add(id);
+    return id;
+  };
+}
+
+export interface NoteHeading {
+  text: string;
+  id: string;
+  level: number;
+  line: number;
+  from: number;
+}
+export function noteHeadings(source: string): NoteHeading[] {
+  const lines = sourceLines(source),
+    slug = headingSlugger(),
+    result: NoteHeading[] = [];
+  let fence: { marker: string; length: number } | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    if (i === 0 && lines[i].text === "---") {
+      const end = lines.findIndex((line, index) => index > 0 && line.text === "---");
+      if (end > 0) {
+        i = end;
+        continue;
+      }
+    }
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i].text);
+    if (marker) {
+      if (!fence) fence = { marker: marker[1][0], length: marker[1].length };
+      else if (
+        marker[1][0] === fence.marker &&
+        marker[1].length >= fence.length &&
+        !marker[2].trim()
+      )
+        fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const heading = /^ {0,3}(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/.exec(lines[i].text);
+    const underline = /^ {0,3}(=+|-+)\s*$/.exec(lines[i + 1]?.text || "");
+    const setext =
+      !heading &&
+      underline &&
+      lines[i].text.trim() &&
+      !/^\s*(?:[-*+>]\s|\d+[.)]\s|#{1,6}\s|\|)/.test(lines[i].text);
+    if (!heading && !setext) continue;
+    const text = heading ? heading[2] : lines[i].text.trim();
+    result.push({
+      text,
+      id: slug(text),
+      level: heading ? heading[1].length : underline![1][0] === "=" ? 1 : 2,
+      line: i + 1,
+      from: lines[i].from,
+    });
+    if (setext) i++;
+  }
+  return result;
+}
+
+export function findHeading(headings: NoteHeading[], fragment: string) {
+  const id = headingId(fragment);
+  return (
+    headings.find((heading) => heading.id === id) ||
+    headings.find((heading) => headingId(heading.text) === id)
+  );
+}
+
 /** A heading or block embed includes only the requested fragment. */
 export function noteFragment(source: string, target: string): string | null {
-  let fragment = target.slice(target.indexOf("#") + 1);
-  if (!target.includes("#") || !fragment) return source;
-  try {
-    fragment = decodeURIComponent(fragment);
-  } catch {}
+  const fragment = decodeFragment(target);
+  if (!fragment) return source;
   if (fragment.startsWith("^"))
     return (
       referenceBlocks(source).find((block) => block.id === fragment.slice(1))?.text ??
       null
     );
-  const lines = sourceLines(source);
-  let start = -1,
-    level = 0,
-    fence: string | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    const marker = /^\s*(```+|~~~+)/.exec(lines[i].text)?.[1]?.[0];
-    if (marker) {
-      fence = fence === marker ? null : marker;
-      continue;
-    }
-    if (fence) continue;
-    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(lines[i].text);
-    if (!heading) continue;
-    if (start >= 0 && heading[1].length <= level)
-      return source.slice(lines[start].from, lines[i].from).trimEnd();
-    if (start < 0 && heading[2].toLocaleLowerCase() === fragment.toLocaleLowerCase()) {
-      start = i;
-      level = heading[1].length;
-    }
-  }
-  return start >= 0 ? source.slice(lines[start].from).trimEnd() : null;
+  const headings = noteHeadings(source),
+    heading = findHeading(headings, fragment);
+  if (!heading) return null;
+  const end = headings.find(
+    (item) => item.from > heading.from && item.level <= heading.level,
+  )?.from;
+  return source.slice(heading.from, end).trimEnd();
 }

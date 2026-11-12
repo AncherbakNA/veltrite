@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import { frontmatter, resolveLink } from "../../shared/markdown";
 import { noteFragment } from "../../shared/markdown-blocks";
 import type { NoteIndex } from "../../shared/types";
+import { scrollWithinMarkdown } from "../navigation";
 import { api } from "../useVault";
 import { VaultFilesContext } from "../VaultContext";
 import { markdownAnchors } from "./markdownAnchors";
@@ -200,12 +201,7 @@ export default function Markdown({
                 onClick={(event) => {
                   event.preventDefault();
                   if (href?.startsWith("#"))
-                    document.getElementById(href.slice(1))?.scrollIntoView({
-                      behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
-                        .matches
-                        ? "auto"
-                        : "smooth",
-                    });
+                    scrollWithinMarkdown(event.currentTarget, href.slice(1));
                   else if (/^https?:/.test(href || "")) api().openExternal(href!);
                   else if (href) onLink(href);
                 }}

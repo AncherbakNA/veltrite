@@ -24,13 +24,16 @@ interface Props {
   openLink: (target: string, from: string, paneId: string) => void;
   bookmark: (path: string) => unknown;
   commands: Command[];
-  pluginCommands: Command[];
   setDialog: Dispatch<SetStateAction<DialogData | null>>;
   setPalette: Dispatch<
-    SetStateAction<{ commands: Command[]; placeholder?: string } | null>
+    SetStateAction<{
+      commands: Command[];
+      placeholder?: string;
+      scope?: "commands";
+      onPick?: () => void;
+    } | null>
   >;
   setSelection: (text: string) => void;
-  onAction: (id: string) => void;
   canGoBack: boolean;
   onBack: () => void;
 }
@@ -45,11 +48,9 @@ export default function DocumentPane({
   openLink,
   bookmark,
   commands,
-  pluginCommands,
   setDialog,
   setPalette,
   setSelection,
-  onAction,
   canGoBack,
   onBack,
 }: Props) {
@@ -195,15 +196,7 @@ export default function DocumentPane({
                   preferences={preferences!}
                   onLink={(target) => openLink(target, current.path, pane.id)}
                   onCommand={(onPick) =>
-                    setPalette({
-                      commands: [...commands, ...pluginCommands].map((command) => ({
-                        ...command,
-                        run: () => {
-                          onPick?.();
-                          setTimeout(() => onAction(command.id), 0);
-                        },
-                      })),
-                    })
+                    setPalette({ commands: [], scope: "commands", onPick })
                   }
                   onSelection={setSelection}
                   live={mode !== "source"}

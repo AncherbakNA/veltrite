@@ -181,12 +181,12 @@ export default function Settings({
                   aria-label="Акцентный цвет"
                 >
                   {[
-                    ["#c0603a", "Охра"],
-                    ["#3d63b8", "Чернила"],
-                    ["#51785b", "Зелёный"],
-                    ["#946341", "Коричневый"],
-                    ["#906176", "Сливовый"],
-                    ["#61747d", "Серый"],
+                    ["#b99871", "Медь"],
+                    ["#74805a", "Олива"],
+                    ["#a77d68", "Глина"],
+                    ["#8f734f", "Табак"],
+                    ["#8a6e74", "Слива"],
+                    ["#717b7a", "Графит"],
                   ].map(([value, label]) => (
                     <button
                       key={value}
@@ -204,7 +204,7 @@ export default function Settings({
                     Свой
                     <input
                       aria-label="Свой акцентный цвет"
-                      placeholder="#c0603a"
+                      placeholder="#b99871"
                       defaultValue={preferences.accent}
                       key={preferences.accent}
                       maxLength={7}

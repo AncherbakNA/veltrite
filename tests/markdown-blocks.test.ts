@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeFragment,
+  findHeading,
   headingId,
   noteFragment,
+  noteHeadings,
   referenceBlocks,
   renderedBlocks,
   tableCells,
@@ -39,4 +42,27 @@ describe("Блоки Markdown", () => {
     );
     expect(headingId("**Заголовок** с [[Заметка|ссылкой]]")).toBe("заголовок-с-ссылкой");
   });
+});
+
+it("адреса дубликатов уникальны, закодированные ссылки и встраивание используют те же ID", () => {
+  const source =
+    "---\ntitle: Проверка\n---\n# Раздел\nОдин\n# Раздел\nДва\n# Раздел-2\nТри\n# Раздел\nЧетыре\n\n```md\n# Раздел\n```\n";
+  const headings = noteHeadings(source);
+  expect(headings.map((item) => item.id)).toEqual([
+    "раздел",
+    "раздел-2",
+    "раздел-2-2",
+    "раздел-3",
+  ]);
+  expect(
+    findHeading(
+      headings,
+      decodeFragment("Заметка#%D1%80%D0%B0%D0%B7%D0%B4%D0%B5%D0%BB-2"),
+    )?.line,
+  ).toBe(6);
+  expect(noteFragment(source, "#раздел-2")).toBe("# Раздел\nДва");
+  expect(noteFragment(source, "#раздел-2-2")).toBe("# Раздел-2\nТри");
+  expect(noteHeadings("Заголовок\n===\n\nПодзаголовок\n---").map((h) => h.level)).toEqual(
+    [1, 2],
+  );
 });

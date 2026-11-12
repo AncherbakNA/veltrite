@@ -627,7 +627,15 @@ const methods: Record<string, (...args: any[]) => any> = {
     return catalog.saveTheme(JSON.parse(await fs.readFile(result.filePaths[0], "utf8")));
   },
   removeTheme: (id: string) => catalog.removeTheme(id),
-  plugins: () => plugins.list(),
+  plugins: async () =>
+    (await plugins.list()).map((plugin) =>
+      plugin.main
+        ? {
+            ...plugin,
+            registeredCommands: pluginRuntime?.registeredCommands(plugin.id) || [],
+          }
+        : plugin,
+    ),
   installPlugin: async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Установить расширение Veltrite",

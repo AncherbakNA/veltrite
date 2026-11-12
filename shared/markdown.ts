@@ -1,6 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { normalizePath } from "./links";
-import { referenceBlocks } from "./markdown-blocks";
+import { noteHeadings, referenceBlocks } from "./markdown-blocks";
 import type { NoteIndex } from "./types";
 function plainProperties(value: unknown, active = new Set<object>(), depth = 0): unknown {
   if (depth > 20) throw Error("Слишком глубокие свойства");
@@ -66,19 +66,11 @@ export function indexNote(path: string, content: string): NoteIndex {
         links.push(m[1]);
       }
     }
-  const headerLines =
-    content.slice(0, content.length - body.length).split("\n").length - 1;
-  let fence: string | null = null;
-  const headings = body.split("\n").flatMap((line, i) => {
-    const marker = /^\s*(```+|~~~+)/.exec(line)?.[1]?.[0];
-    if (marker) {
-      fence = fence === marker ? null : marker;
-      return [];
-    }
-    if (fence) return [];
-    const m = /^(#{1,6})\s+(.+)$/.exec(line);
-    return m ? [{ level: m[1].length, text: m[2], line: i + 1 + headerLines }] : [];
-  });
+  const headings = noteHeadings(content).map(({ level, text, line }) => ({
+    level,
+    text,
+    line,
+  }));
   return {
     path,
     title: path.split("/").pop()!.replace(/\.md$/i, ""),

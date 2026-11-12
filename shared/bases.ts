@@ -1,5 +1,5 @@
 import jsep from "jsep";
-import { resolveLink } from "./markdown";
+import { linkResolver } from "./graph";
 import type { FileEntry, NoteIndex } from "./types";
 
 type Value = unknown;
@@ -281,6 +281,19 @@ export function matchesFilter(
     }
   throw Error("Неподдерживаемый фильтр");
 }
+const resolvers = new WeakMap<NoteIndex[], ReturnType<typeof linkResolver>>();
+function resolveFor(index: NoteIndex[]) {
+  let resolve = resolvers.get(index);
+  if (!resolve) {
+    resolve = linkResolver(
+      index.map((note) => note.path),
+      index,
+    );
+    resolvers.set(index, resolve);
+  }
+  return resolve;
+}
+
 export function rowEvaluator(
   note: NoteIndex,
   file: FileEntry | undefined,
@@ -304,23 +317,15 @@ export function rowEvaluator(
       hasTag: (tag: string) =>
         note.tags.some((t) => t === tag || t.startsWith(tag + "/")),
       inFolder: (value: string) => folder === value || folder.startsWith(value + "/"),
-      hasLink: (target: string) =>
-        note.links.some(
-          (l) =>
-            l === target ||
-            resolveLink(
-              l,
-              note.path,
-              index.map((n) => n.path),
-              index,
-            ) ===
-              resolveLink(
-                target,
-                note.path,
-                index.map((n) => n.path),
-                index,
-              ),
-        ),
+      hasLink: (target: string) => {
+        const resolve = resolveFor(index),
+          resolved = resolve(target, note.path);
+        return note.links.some(
+          (link) =>
+            link === target ||
+            (resolved !== null && resolve(link, note.path) === resolved),
+        );
+      },
     },
   };
   const active = new Set<string>(),

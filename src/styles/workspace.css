@@ -523,10 +523,10 @@
   gap: 4px;
 }
 .starred {
-  color: #e4c58a;
+  color: var(--accent-ink);
 }
 .starred svg {
-  fill: color-mix(in srgb, #e4c58a 20%, transparent);
+  fill: color-mix(in srgb, var(--accent-ink) 20%, transparent);
 }
 
 /* Контекстная панель. На небольшом экране открывается поверх документа. */
@@ -928,6 +928,8 @@
   overflow: hidden;
 }
 .document-leaf {
+  container-type: inline-size;
+  container-name: document;
   flex-direction: column;
   position: relative;
 }
@@ -970,4 +972,49 @@
 .virtual-tree .tree-row {
   height: 28px;
   min-height: 28px;
+}
+
+@container document (max-width: 480px) {
+  .document-toolbar {
+    padding-inline: 6px;
+    gap: 4px;
+  }
+  .document-tools .reading-toggle span {
+    display: none;
+  }
+  .document-tools .pane-secondary {
+    display: none;
+  }
+  .breadcrumb-path > span:not(:last-child) {
+    display: none;
+  }
+  .breadcrumb {
+    gap: 2px;
+  }
+}
+@container document (max-width: 240px) {
+  .breadcrumb > .icon-button {
+    display: none;
+  }
+  .document-toolbar {
+    padding-inline: 3px;
+    gap: 2px;
+  }
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 4px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pagination > span:first-child {
+  margin-right: auto;
+}
+.pagination .icon-button {
+  padding: 4px;
 }

@@ -2,7 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { indexNote, validateCanvas } from "../shared/markdown";
-import type { NoteIndex } from "../shared/types";
+import type { SearchDocument } from "../shared/search";
+import { DEFAULT_ACCENT } from "../shared/themes";
+import type { NoteIndex, SearchResult } from "../shared/types";
 import {
   defaultPreferences,
   type FileEntry,
@@ -43,6 +45,38 @@ export class Vault {
     string,
     { modified: number; size: number; note: NoteIndex }
   >();
+  private textCache = new Map<
+    string,
+    { modified: number; size: number; content: string }
+  >();
+  private textBytes = 0;
+  private forgetText(path: string) {
+    const cached = this.textCache.get(path);
+    if (cached) this.textBytes -= cached.content.length * 2;
+    this.textCache.delete(path);
+  }
+  private async indexContent(file: FileEntry) {
+    const cached = this.textCache.get(file.path);
+    if (cached && cached.modified === file.modified && cached.size === file.size) {
+      this.textCache.delete(file.path);
+      this.textCache.set(file.path, cached);
+      return cached.content;
+    }
+    this.forgetText(file.path);
+    const content = (await this.read(file.path)).content,
+      bytes = content.length * 2;
+    if (bytes <= 2 * 1024 * 1024) {
+      this.textCache.set(file.path, {
+        content,
+        modified: file.modified,
+        size: file.size,
+      });
+      this.textBytes += bytes;
+      while (this.textBytes > 32 * 1024 * 1024)
+        this.forgetText(this.textCache.keys().next().value!);
+    }
+    return content;
+  }
   root: string;
   id = "";
   preferences: Preferences = { ...defaultPreferences };
@@ -73,10 +107,12 @@ export class Vault {
       );
     }
     try {
-      this.preferences = mergePreferences(
-        defaultPreferences,
-        JSON.parse(await fs.readFile(await this.meta("preferences.json"), "utf8")),
+      const saved = JSON.parse(
+        await fs.readFile(await this.meta("preferences.json"), "utf8"),
       );
+      if (saved?.accent?.toLowerCase() === "#c0603a" && saved.customTheme == null)
+        saved.accent = DEFAULT_ACCENT;
+      this.preferences = mergePreferences(defaultPreferences, saved);
     } catch (e: any) {
       if (e.code !== "ENOENT") throw Error("Не удалось прочитать настройки хранилища");
     }
@@ -166,6 +202,7 @@ export class Vault {
     if (old && old.toString("utf8") !== content) await this.backup(rel, old);
     await atomicWrite(full, content);
     this.noteCache.delete(rel);
+    this.forgetText(rel);
     return { path: rel, content, revision: hash(content) };
   }
   async create(rel: string, content = ""): Promise<NoteData> {
@@ -215,6 +252,8 @@ export class Vault {
     await ensureParent(destination);
     await fs.rename(source, destination);
     this.noteCache.clear();
+    this.textCache.clear();
+    this.textBytes = 0;
     for (const oldFile of oldFiles.filter((f) =>
       ["note", "canvas", "base"].includes(f.kind),
     )) {
@@ -374,15 +413,18 @@ export class Vault {
     return next;
   }
   async index() {
-    const files = (await this.list()).filter((file) => file.kind === "note");
+    return this.indexFiles((await this.list()).filter((file) => file.kind === "note"));
+  }
+  private async indexFiles(files: FileEntry[]) {
     const live = new Set(files.map((file) => file.path));
     for (const key of this.noteCache.keys())
       if (!live.has(key)) this.noteCache.delete(key);
+    for (const key of this.textCache.keys()) if (!live.has(key)) this.forgetText(key);
     return mapLimit(files, 8, async (file) => {
       const cached = this.noteCache.get(file.path);
       if (cached && cached.size === file.size && cached.modified === file.modified)
         return cached.note;
-      const note = indexNote(file.path, (await this.read(file.path)).content);
+      const note = indexNote(file.path, await this.indexContent(file));
       this.noteCache.set(file.path, {
         note,
         size: file.size,
@@ -399,12 +441,38 @@ export class Vault {
     this.searchController = controller;
     try {
       if (!query.trim()) return [];
-      const notes = await this.index();
-      const documents = await mapLimit(notes, 8, async (note) => {
+      const files = (await this.list()).filter((file) => file.kind === "note");
+      if (controller.signal.aborted) throw Error("Поиск отменён");
+      const notes = await this.indexFiles(files);
+      const byPath = new Map(notes.map((note) => [note.path, note]));
+      let batch: SearchDocument[] = [],
+        bytes = 0;
+      const results: SearchResult[] = [],
+        started = Date.now();
+      const flushBatch = async () => {
+        if (!batch.length) return;
+        if (Date.now() - started > 10000)
+          throw Error("Поиск занял слишком много времени. Уточните запрос.");
+        results.push(
+          ...(await runSearch(this.searchWorker, batch, query, controller.signal)),
+        );
+        batch = [];
+        bytes = 0;
+      };
+      // Batches bound retained text and worker copies even for large vaults.
+      for (const file of files) {
         if (controller.signal.aborted) throw Error("Поиск отменён");
-        return { note, text: (await this.read(note.path)).content };
-      });
-      return await runSearch(this.searchWorker, documents, query, controller.signal);
+        const text = await this.indexContent(file),
+          note = byPath.get(file.path)!;
+        batch.push({ note, text });
+        bytes += text.length * 2 + JSON.stringify(note).length * 2;
+        if (batch.length >= 512 || bytes >= 8 * 1024 * 1024) {
+          await flushBatch();
+          if (results.length >= 500) break;
+        }
+      }
+      if (results.length < 500) await flushBatch();
+      return results.slice(0, 500);
     } finally {
       if (this.searchController === controller) this.searchController = null;
     }

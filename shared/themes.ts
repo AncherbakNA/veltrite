@@ -1,3 +1,17 @@
+export const DEFAULT_ACCENT = "#b99871";
+export const LIGHT_ACCENT = "#806342";
+export function accentForTheme(accent: string, dark: boolean) {
+  return accent.toLowerCase() === DEFAULT_ACCENT
+    ? dark
+      ? DEFAULT_ACCENT
+      : LIGHT_ACCENT
+    : accent;
+}
+export function accentButtonText(accent: string) {
+  return contrast(accent, "#000000") >= contrast(accent, "#ffffff")
+    ? "#000000"
+    : "#ffffff";
+}
 export const themeTokens = [
   "bg",
   "panel",

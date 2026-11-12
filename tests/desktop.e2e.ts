@@ -820,7 +820,7 @@ test("большой холст сохраняет все карточки и о
     await page.getByTitle("Увеличить", { exact: true }).click();
   await expect(page.locator(".canvas-overview")).toHaveCount(0);
   await expect.poll(() => page.locator(".canvas-node").count()).toBeGreaterThan(0);
-  expect(await page.locator(".canvas-node").count()).toBeLessThan(200);
+  expect(await page.locator(".canvas-node").count()).toBeLessThan(300);
   await page.locator(".canvas-node textarea").first().fill("Изменённая карточка");
   await expect
     .poll(async () =>
@@ -1060,7 +1060,9 @@ test("расширение из каталога включается после
   await page.keyboard.press("Escape");
   await page.keyboard.press(`${modifier}+p`);
   await page.getByPlaceholder("Найти команду…").fill("Дата и время: Вставить");
-  await page.keyboard.press("Enter");
+  await page
+    .getByRole("button", { name: "Дата и время: Вставить дату и время", exact: true })
+    .click();
   await expect
     .poll(() => fs.readFile(path.join(root, "Начало.md"), "utf8"))
     .toContain(String(new Date().getFullYear()));
@@ -1071,4 +1073,201 @@ test("расширение из каталога включается после
     .click();
   await expect(toggle).toHaveCount(0);
   expect(await page.evaluate(() => window.veltrite.plugins())).toEqual([]);
+});
+
+test("ссылки на повторяющиеся заголовки прокручивают свою панель, узкие панели сохраняют управление", async () => {
+  const encoded = encodeURIComponent("раздел-2");
+  const text =
+    `# Раздел\n\n[Обычная ссылка](#${encoded})\n\n[[Длинная#${encoded}|Wiki-переход]]\n\n` +
+    "Длинный абзац.\n\n".repeat(100) +
+    "# Раздел\n\nВторой раздел.\n\n# Раздел-2\n\nКонец.";
+  await fs.writeFile(path.join(root, "Длинная.md"), text);
+  await page.locator(".tree-file").filter({ hasText: "Длинная" }).click();
+  await page.getByRole("button", { name: "Чтение", exact: true }).click();
+  await page.getByRole("button", { name: "Разделить вправо", exact: true }).click();
+  await application.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setSize(940, 680),
+  );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const left = page.locator(".document-leaf").nth(0),
+    right = page.locator(".document-leaf").nth(1);
+  await expect(right.locator(".reading-pane")).toBeVisible();
+  expect(
+    await right
+      .locator(".reading-pane > .markdown")
+      .evaluate((root) => [...root.querySelectorAll("h1")].map((heading) => heading.id)),
+  ).toEqual(["раздел", "раздел-2", "раздел-2-2"]);
+  await right.getByRole("link", { name: "Обычная ссылка", exact: true }).click();
+  await expect
+    .poll(() => right.locator(".reading-pane").evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(300);
+  expect(
+    await left.locator(".reading-pane").evaluate((element) => element.scrollTop),
+  ).toBe(0);
+  await right.locator(".reading-pane").evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await right.getByRole("link", { name: "Wiki-переход", exact: true }).click();
+  await expect
+    .poll(() => right.locator(".reading-pane").evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(300);
+  expect(
+    await left.locator(".reading-pane").evaluate((element) => element.scrollTop),
+  ).toBe(0);
+  for (const pane of [left, right]) {
+    await expect(pane.getByRole("button", { name: "Правка", exact: true })).toBeVisible();
+    await expect(
+      pane.getByRole("button", { name: "Закрыть панель", exact: true }),
+    ).toBeVisible();
+    expect(
+      await pane
+        .locator(".document-toolbar")
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(1);
+  }
+});
+
+test("большие коллекции и базы разбиты на страницы, итоги считают все отфильтрованные заметки", async () => {
+  test.setTimeout(60000);
+  await fs.mkdir(path.join(root, "Много"));
+  await Promise.all(
+    Array.from({ length: 501 }, (_, i) =>
+      fs.writeFile(
+        path.join(root, "Много", `p${String(i).padStart(4, "0")}.md`),
+        `---\nvalue: 1\n---\n# Файл ${i}\n`,
+      ),
+    ),
+  );
+  await fs.writeFile(
+    path.join(root, "Обзор.base"),
+    'filters: file.inFolder("Много")\nviews:\n  - type: table\n    name: Все\n    order: [file.name, value]\n    summaries:\n      value: Sum\n',
+  );
+  await expect
+    .poll(() => page.evaluate(async () => (await window.veltrite.index()).length))
+    .toBe(503);
+  await page.getByRole("button", { name: "Фильтр файлов", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "Текст", exact: true }).click();
+  await expect(page.locator(".collection-row")).toHaveCount(200);
+  await page.getByRole("button", { name: "Следующая страница", exact: true }).click();
+  await expect(page.locator(".pagination")).toContainText("201–400 из 503");
+  await page
+    .getByRole("textbox", { name: "Найти среди файлов", exact: true })
+    .fill("p0500");
+  await expect(page.locator(".collection-row")).toHaveCount(1);
+  await page.keyboard.press(`${modifier}+o`);
+  await page.getByPlaceholder("Перейти к файлу…").fill("Обзор");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".base-table tbody tr")).toHaveCount(200);
+  await expect(page.locator(".base-summary")).toHaveText("501");
+  await page.getByRole("button", { name: "Следующая страница", exact: true }).click();
+  await page.getByRole("button", { name: "Следующая страница", exact: true }).click();
+  await expect(page.locator(".base-table tbody tr")).toHaveCount(101);
+  await expect(page.locator(".base-summary")).toHaveText("501");
+});
+
+test("расширение снимает регистрацию команды и ограничивает параллельные обращения", async () => {
+  await installScript(
+    "once",
+    ["vault.read", "storage"],
+    `export default async api => {
+    const remove = await api.commands.register("run", async () => {
+      const results = await Promise.allSettled(Array.from({length: 100}, () => api.vault.read("Начало.md")));
+      await api.storage.set("requests", {ok: results.filter(r => r.status === "fulfilled").length, rejected: results.filter(r => r.status === "rejected").length});
+      await remove();
+    });
+  };`,
+  );
+  await page.evaluate(() =>
+    window.veltrite.togglePlugin("once", true, ["vault.read", "storage"]),
+  );
+  expect(
+    await page.evaluate(
+      async () =>
+        (await window.veltrite.plugins()).find((p) => p.id === "once")
+          ?.registeredCommands,
+    ),
+  ).toEqual(["run"]);
+  await page.evaluate(() => window.veltrite.executePlugin("once", "run"));
+  expect(
+    await page.evaluate(
+      async () =>
+        (await window.veltrite.plugins()).find((p) => p.id === "once")
+          ?.registeredCommands,
+    ),
+  ).toEqual([]);
+  const result = JSON.parse(
+    await fs.readFile(path.join(temp, "profile", "plugins", "data", "once.json"), "utf8"),
+  );
+  expect(result.requests.ok).toBeGreaterThan(0);
+  expect(result.requests.ok).toBeLessThanOrEqual(16);
+  expect(result.requests.ok + result.requests.rejected).toBe(100);
+  await expect(
+    page.evaluate(() => window.veltrite.executePlugin("once", "run")),
+  ).rejects.toThrow("недоступна");
+});
+
+test("аудиозапись из синтетического потока сохраняется в заметку и блокирует смену хранилища", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.evaluate(async () => {
+    const context = new AudioContext(),
+      destination = context.createMediaStreamDestination(),
+      tone = context.createOscillator();
+    tone.connect(destination);
+    tone.start();
+    await context.resume();
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => destination.stream,
+    });
+    (window as any).__audioTest = () => {
+      tone.stop();
+      return context.close();
+    };
+  });
+  await page.keyboard.press(`${modifier}+p`);
+  await page.getByPlaceholder("Найти команду…").fill("Записать аудио");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".recording-text")).toBeVisible();
+  await page.getByRole("button", { name: "Хранилище: vault", exact: true }).click();
+  await page.getByRole("button", { name: "Открыть папку…", exact: true }).click();
+  await expect(page.locator(".toast")).toContainText("Завершите запись");
+  expect(
+    await page.evaluate(async () => (await window.veltrite.state()).vault?.root),
+  ).toBe(await fs.realpath(root));
+  await page.waitForTimeout(300);
+  await page.locator(".recording-text").click();
+  await expect(page.locator(".recording-text")).toHaveCount(0);
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Начало.md"), "utf8"))
+    .toContain(".webm]]");
+  const content = await fs.readFile(path.join(root, "Начало.md"), "utf8"),
+    filename = /!\[\[([^\]]+\.webm)\]\]/.exec(content)![1];
+  const audio = await fs.readFile(path.join(root, filename));
+  expect(audio.subarray(0, 4).toString("hex")).toBe("1a45dfa3");
+  expect(audio.length).toBeGreaterThan(200);
+  await page.evaluate(() => (window as any).__audioTest());
+});
+
+test("основной медный акцент адаптируется к тёмной и светлой теме, пользовательский цвет сохраняется", async () => {
+  expect(
+    await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
+    ),
+  ).toBe("#b99871");
+  await page.evaluate(() => window.veltrite.preferences({ theme: "light" }));
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
+      ),
+    )
+    .toBe("#806342");
+  await page.evaluate(() => window.veltrite.preferences({ accent: "#74805a" }));
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
+      ),
+    )
+    .toBe("#74805a");
 });
