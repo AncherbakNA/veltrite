@@ -160,6 +160,7 @@ export function CommandPalette({
           {filtered.map((command, i) => (
             <button
               key={command.id}
+              aria-label={command.name}
               className={i === selectedIndex ? "selected" : ""}
               onMouseEnter={() => setSelected(i)}
               onClick={() => invoke(command)}

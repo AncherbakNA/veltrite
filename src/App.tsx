@@ -1,9 +1,14 @@
 import { Check, Clock3, FolderOpen, GitBranch, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parse as yamlParse, stringify as yamlStringify } from "yaml";
+import { parse as yamlParse } from "yaml";
+import { legacyBookmarks, type Bookmark } from "../shared/bookmarks";
+import { editorActions } from "../shared/editor-actions";
 import { plural } from "../shared/format";
+import { editFrontmatter } from "../shared/frontmatter-edit";
 import { linkResolver } from "../shared/graph";
-import { frontmatter, indexNote, resolveLink } from "../shared/markdown";
+import { effectiveHotkeys, eventShortcut, shortcutLabel } from "../shared/hotkeys";
+import { folderFile } from "../shared/links";
+import { indexNote, resolveLink } from "../shared/markdown";
 import {
   decodeFragment,
   findHeading,
@@ -11,6 +16,8 @@ import {
   referenceBlocks,
 } from "../shared/markdown-blocks";
 import { leaves } from "../shared/panes";
+import { parseProperty, type PropertyType } from "../shared/properties";
+import { formatDate, renderTemplate } from "../shared/templates";
 import {
   accentButtonText,
   accentForTheme,
@@ -18,7 +25,7 @@ import {
   themeTokens,
 } from "../shared/themes";
 import type { HistoryItem, PluginInfo, Preferences } from "../shared/types";
-import { VaultFilesContext } from "./VaultContext";
+import { VaultFilesContext, VaultRuntimeContext } from "./VaultContext";
 import { buildCommands } from "./commands";
 import BrandMark from "./components/BrandMark";
 import {
@@ -31,14 +38,20 @@ import DocumentBoundary from "./components/DocumentBoundary";
 import DocumentPane from "./components/DocumentPane";
 import FileCollection from "./components/FileCollection";
 import Inspector from "./components/Inspector";
-import Markdown from "./components/Markdown";
+import NoteComposer, { type ComposerState } from "./components/NoteComposer";
 import PaneTree from "./components/PaneTree";
+import { PluginButtons, PluginStatus } from "./components/PluginButtons";
+import PropertiesManager from "./components/PropertiesManager";
 import Sidebar, { type FileFilter } from "./components/Sidebar";
+import Slides from "./components/Slides";
 import Welcome from "./components/Welcome";
 import WindowTabs from "./components/WindowTabs";
 import WorkspaceHome from "./components/WorkspaceHome";
-import { insertIntoEditor } from "./editorInsertion";
-import { scrollToNoteAnchor } from "./navigation";
+import { editorSnapshot, insertIntoEditor, runEditorAction } from "./editorInsertion";
+import { navigateToNote } from "./navigation";
+import { isMac } from "./ui";
+import { usePluginActions } from "./usePluginActions";
+import { useStyles } from "./useStyles";
 import { api, useVault } from "./useVault";
 const Graph = lazy(() => import("./components/Graph"));
 const Settings = lazy(() => import("./components/Settings"));
@@ -69,8 +82,21 @@ export default function App() {
   const setMode = workspace.setPaneMode;
   const vault = state?.vault || null,
     preferences = vault?.preferences;
+  const hotkeysRef = useRef(preferences?.hotkeys || {});
+  hotkeysRef.current = preferences?.hotkeys || {};
   const currentRef = useRef(current);
   currentRef.current = current;
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const [composer, setComposer] = useState<ComposerState | null>(null);
+  const [requestedSearch, setRequestedSearch] = useState<{
+    query: string;
+    id: number;
+  } | null>(null);
+  const [graphBookmark, setGraphBookmark] = useState<{
+    query: string;
+    local?: string;
+    id: number;
+  } | null>(null);
   const [section, setSection] = useState("files"),
     [graph, setGraph] = useState(false),
     [home, setHome] = useState(false),
@@ -118,6 +144,8 @@ export default function App() {
         preferences.theme === "dark" ||
         (preferences.theme === "system" && system.matches);
       document.documentElement.dataset.theme = dark ? "dark" : "light";
+      document.body.classList.toggle("theme-dark", dark);
+      document.body.classList.toggle("theme-light", !dark);
       const colors = preferences.customTheme?.variants[dark ? "dark" : "light"];
       for (const token of themeTokens) {
         if (colors)
@@ -153,6 +181,7 @@ export default function App() {
     document.documentElement.dataset.textFont = preferences.textFont;
     return () => system.removeEventListener("change", applyTheme);
   }, [preferences]);
+  useStyles(preferences, vault?.root);
   useEffect(() => api().onMenu((action) => actionRef.current(action)), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -160,6 +189,7 @@ export default function App() {
         e.preventDefault();
         return;
       }
+      if ((e.target as Element | null)?.closest?.("[data-hotkey-recording]")) return;
       if (e.key === "Escape") {
         setPalette(null);
         setDialog(null);
@@ -167,36 +197,29 @@ export default function App() {
         setHistory(null);
         setTrash(null);
         setSlides(null);
+        setComposer(null);
+        setPropertiesOpen(false);
         return;
       }
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const command = (
-        {
-          KeyN: "new-note",
-          KeyO: "quick-open",
-          KeyP: "commands",
-          KeyS: e.shiftKey ? "sync" : "save",
-          Comma: "settings",
-          KeyE: "toggle-reading",
-          KeyF: e.shiftKey ? "search" : null,
-        } as Record<string, string | null>
-      )[e.code];
+      if ((e.target as Element | null)?.closest?.("[data-hotkey-recording]")) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      const shortcut = eventShortcut(e, isMac);
+      if (!shortcut) return;
+      const command = Object.entries(effectiveHotkeys(hotkeysRef.current)).find(
+        ([, values]) => values.includes(shortcut),
+      )?.[0];
       if (command) {
         e.preventDefault();
+        e.stopPropagation();
         actionRef.current(command);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
   const open = useCallback(
     (path: string, paneId?: string) =>
       run(async () => {
-        const entry = vault?.files.find((f) => f.path === path);
-        if (entry?.kind === "attachment") {
-          await api().openAttachment(path);
-          return;
-        }
         await workspace.open(path, paneId);
         setGraph(false);
         setHome(false);
@@ -222,34 +245,28 @@ export default function App() {
       error("Откройте заметку");
       return;
     }
-    workspace.edit(
-      draft.path,
-      draft.content + (draft.content.endsWith("\n") ? "" : "\n") + text,
-    );
+    setMode((mode) => (mode === "read" ? "live" : mode));
+    void run(() => insertIntoEditor(draft.path, workspace.activePane, text));
   };
-  useEffect(
-    () =>
-      api().onPluginAction((action) => {
-        if (action.type === "notice") {
-          message(action.text);
-          return;
-        }
-        const draft = currentRef.current;
-        if (!draft || !/\.md$/i.test(draft.path)) {
-          error("Откройте текстовую заметку");
-          return;
-        }
-        if (action.type === "append") {
-          workspace.edit(draft.path, draft.content + action.text);
-          return;
-        }
-        void run(async () => {
-          workspace.setPaneMode((previous) => (previous === "read" ? "live" : previous));
-          await insertIntoEditor(draft.path, workspace.activePane, action.text);
-        });
-      }),
-    [message, error, workspace.edit, workspace.activePane],
-  );
+  usePluginActions({
+    workspace,
+    currentRef,
+    onNotice: message,
+    onSearch: (query) => {
+      setSection("search");
+      setRequestedSearch({ query, id: Date.now() });
+    },
+    onGraph: () => {
+      setHome(false);
+      setCollection(null);
+      setGraph(true);
+    },
+    onDocument: () => {
+      setHome(false);
+      setCollection(null);
+      setGraph(false);
+    },
+  });
   useEffect(() => {
     setSelection("");
   }, [active, workspace.activePane]);
@@ -302,25 +319,52 @@ export default function App() {
         await open(resolved, paneId);
         const subpath = decodeFragment(target);
         if (!subpath) return;
+        if (/\.pdf$/i.test(resolved)) {
+          const number = Number(new URLSearchParams(subpath).get("page")) || 1;
+          const started = performance.now();
+          await new Promise<void>((resolve, reject) => {
+            const navigate = () => {
+              const viewer = [
+                ...document.querySelectorAll<HTMLElement>(".pdf-viewer"),
+              ].find(
+                (element) =>
+                  element.dataset.pdfPath === resolved &&
+                  element.closest<HTMLElement>("[data-pane-id]")?.dataset.paneId ===
+                    paneId,
+              );
+              if (viewer?.dataset.pdfReady === "true") {
+                window.dispatchEvent(
+                  new CustomEvent("veltrite:pdf-page", {
+                    detail: { path: resolved, paneId, page: number },
+                  }),
+                );
+                resolve();
+              } else if (performance.now() - started > 8000)
+                reject(Error("Не удалось открыть страницу PDF"));
+              else requestAnimationFrame(navigate);
+            };
+            navigate();
+          });
+          return;
+        }
+        if (!/\.md$/i.test(resolved)) return;
         const tab = tabs.find((t) => t.path === resolved),
           text = tab?.content || (await api().read(resolved)).content;
         const heading = findHeading(noteHeadings(text), subpath);
         const block = subpath.startsWith("^")
           ? referenceBlocks(text).find((item) => item.id === subpath.slice(1))
           : null;
-        setTimeout(() => {
-          scrollToNoteAnchor(
-            resolved,
-            subpath.startsWith("^") ? "block-" + subpath.slice(1) : heading?.id || "",
-            paneId,
-          );
-          if (heading || block)
-            window.dispatchEvent(
-              new CustomEvent("veltrite:goto", {
-                detail: { path: resolved, line: heading?.line || block!.line, paneId },
-              }),
-            );
-        }, 60);
+        const destinationPane = paneId || workspace.activePane;
+        const destinationMode =
+          leaves(workspace.layout).find((pane) => pane.id === destinationPane)?.mode ||
+          mode;
+        await navigateToNote(
+          resolved,
+          destinationPane,
+          destinationMode,
+          subpath.startsWith("^") ? "block-" + subpath.slice(1) : heading?.id || "",
+          heading?.line || block?.line,
+        );
       });
     else newFile("note", target.split("#")[0]);
   };
@@ -380,25 +424,64 @@ export default function App() {
   const quickOpen = () =>
     setPalette({
       placeholder: "Перейти к файлу…",
-      commands: (
-        vault?.files.filter((f) => ["note", "canvas", "base"].includes(f.kind)) || []
-      ).map((f) => ({
+      commands: (vault?.files.filter((f) => f.kind !== "folder") || []).map((f) => ({
         id: f.path,
         name: f.path.replace(/\.(md|canvas|base)$/i, ""),
-        group: f.kind === "canvas" ? "Холст" : f.kind === "base" ? "База" : "Заметка",
+        group:
+          f.kind === "canvas"
+            ? "Холст"
+            : f.kind === "base"
+              ? "База"
+              : f.kind === "attachment"
+                ? "Вложение"
+                : "Заметка",
         run: () => open(f.path),
       })),
     });
   const daily = () =>
     run(async () => {
       const now = new Date(),
-        date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
-        path = preferences!.dailyFolder + "/" + date + ".md";
-      if (!vault?.files.some((f) => f.path === path))
+        date = formatDate(now, "YYYY-MM-DD"),
+        title = formatDate(now, preferences!.dailyFormat),
+        path = folderFile(preferences!.dailyFolder, title + ".md");
+      if (!vault?.files.some((f) => f.path === path)) {
+        const template = preferences!.dailyTemplate
+          ? (await api().read(preferences!.dailyTemplate)).content
+          : `---\ndate: ${date}\ntags: [дневник]\n---\n# ${now.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}\n\n`;
         await api().create(
           path,
-          `---\ndate: ${date}\ntags: [дневник]\n---\n# ${now.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}\n\n`,
+          renderTemplate(template, {
+            title: title.split("/").pop()!,
+            date: now,
+            dateFormat: preferences!.templateDateFormat,
+            timeFormat: preferences!.templateTimeFormat,
+          }),
         );
+      }
+      await workspace.refresh();
+      await open(path);
+    });
+  const unique = () =>
+    run(async () => {
+      if (!preferences) return;
+      const now = new Date(),
+        title = formatDate(now, preferences.uniqueFormat);
+      let path = title + ".md",
+        suffix = 2;
+      while (vault?.files.some((file) => file.path === path))
+        path = title + "-" + suffix++ + ".md";
+      const template = preferences.uniqueTemplate
+        ? (await api().read(preferences.uniqueTemplate)).content
+        : "";
+      await api().create(
+        path,
+        renderTemplate(template, {
+          title: path.split("/").pop()!.replace(/\.md$/i, ""),
+          date: now,
+          dateFormat: preferences.templateDateFormat,
+          timeFormat: preferences.templateTimeFormat,
+        }),
+      );
       await workspace.refresh();
       await open(path);
     });
@@ -410,6 +493,53 @@ export default function App() {
         : [...preferences.bookmarks, path];
       updatePreferences(await api().preferences({ bookmarks: list }));
     });
+  const saveBookmarks = (bookmarkItems: Bookmark[]) =>
+    run(async () => {
+      if (preferences)
+        updatePreferences({
+          ...preferences,
+          bookmarkItems,
+          bookmarks: legacyBookmarks(bookmarkItems),
+        });
+      updatePreferences(await api().preferences({ bookmarkItems }));
+    });
+  const addBookmark = (item: Bookmark) => {
+    if (!preferences) return;
+    void saveBookmarks([...preferences.bookmarkItems, item]);
+    setSection("bookmarks");
+  };
+  const saveSearch = (query: string) =>
+    setDialog({
+      title: "Сохранить поисковый запрос",
+      initial: query,
+      placeholder: "tag:проект path:Работа",
+      confirm: "Сохранить",
+      onSubmit: (query) => {
+        addBookmark({ id: crypto.randomUUID(), title: "", type: "search", query });
+      },
+    });
+  const openBookmark = (item: Bookmark) => {
+    if (item.type === "file")
+      openLink(item.path + (item.fragment ? "#" + item.fragment : ""));
+    if (item.type === "search") {
+      setRequestedSearch({ query: item.query, id: Date.now() });
+      setSection("search");
+    }
+    if (item.type === "folder") {
+      setRequestedSearch({
+        query: 'path:"' + item.path.replaceAll('"', '\\"') + '/"',
+        id: Date.now(),
+      });
+      setSection("search");
+    }
+    if (item.type === "url") void run(() => api().openExternal(item.url));
+    if (item.type === "graph") {
+      setHome(false);
+      setCollection(null);
+      setGraphBookmark({ query: item.query, local: item.local, id: Date.now() });
+      setGraph(true);
+    }
+  };
   const record = () =>
     run(async () => {
       if (audioSave.current) throw Error("Дождитесь сохранения записи");
@@ -455,6 +585,18 @@ export default function App() {
       setRecording(true);
     });
   const fileAction = (action: string, path: string) => {
+    if (action === "bookmark") {
+      addBookmark({
+        id: crypto.randomUUID(),
+        title: "",
+        type:
+          vault?.files.find((file) => file.path === path)?.kind === "folder"
+            ? "folder"
+            : "file",
+        path,
+      });
+      return;
+    }
     if (action === "reveal") {
       run(() => api().reveal(path));
       return;
@@ -497,6 +639,7 @@ export default function App() {
     newFile,
     quickOpen,
     daily,
+    unique,
     setGraph: (value) => {
       setHome(false);
       setCollection(null);
@@ -523,13 +666,135 @@ export default function App() {
     setMode,
     message,
     error,
-    selection,
+    compose: (operation) => {
+      const snapshot = current && editorSnapshot(current.path, workspace.activePane);
+      if (!current || !/\.md$/i.test(current.path)) {
+        error("Откройте текстовую заметку");
+        return;
+      }
+      if (operation === "extract" && (!snapshot || snapshot.from === snapshot.to)) {
+        error("Сначала выделите текст в редакторе");
+        return;
+      }
+      const source = current.path;
+      void run(async () => {
+        await workspace.flush();
+        setComposer({
+          operation,
+          source,
+          snapshot: snapshot || { content: current.content, from: 0, to: 0 },
+        });
+      });
+    },
     setDialog,
     setPalette,
     tabs,
     active,
     setSlides,
   });
+  commands.push(
+    {
+      id: "bookmark-heading",
+      name: "Добавить заголовок в закладки",
+      run: () => {
+        if (!current) return;
+        const path = current.path;
+        setPalette({
+          placeholder: "Выбрать заголовок…",
+          commands: noteHeadings(current.content).map((heading) => ({
+            id: heading.id,
+            name: heading.text,
+            run: () =>
+              addBookmark({
+                id: crypto.randomUUID(),
+                title: heading.text,
+                type: "file",
+                path,
+                fragment: heading.id,
+              }),
+          })),
+        });
+      },
+    },
+    {
+      id: "bookmark-block",
+      name: "Добавить блок в закладки",
+      run: () => {
+        if (!current) return;
+        const path = current.path;
+        setPalette({
+          placeholder: "Выбрать блок…",
+          commands: referenceBlocks(current.content).map((block) => ({
+            id: block.id,
+            name: "^" + block.id,
+            run: () =>
+              addBookmark({
+                id: crypto.randomUUID(),
+                title: "",
+                type: "file",
+                path,
+                fragment: "^" + block.id,
+              }),
+          })),
+        });
+      },
+    },
+    {
+      id: "bookmark-search",
+      name: "Добавить поиск в закладки",
+      run: () => saveSearch(requestedSearch?.query || ""),
+    },
+    {
+      id: "bookmark-url",
+      name: "Добавить веб-адрес в закладки",
+      run: () =>
+        setDialog({
+          title: "Закладка на веб-страницу",
+          placeholder: "https://…",
+          confirm: "Добавить",
+          onSubmit: (url) => {
+            addBookmark({ id: crypto.randomUUID(), title: "", type: "url", url });
+          },
+        }),
+    },
+  );
+  commands.push(
+    {
+      id: "tab-reopen",
+      name: "Открыть закрытую вкладку",
+      run: () => void run(workspace.reopenTab),
+    },
+    {
+      id: "tab-close-all",
+      name: "Закрыть все незакреплённые вкладки",
+      run: () => void run(() => workspace.closeTabs()),
+    },
+  );
+  commands.push({
+    id: "properties",
+    name: "Открыть все свойства хранилища",
+    run: () =>
+      void run(async () => {
+        await workspace.flush();
+        setPropertiesOpen(true);
+      }),
+  });
+  commands.push(
+    ...Object.entries(editorActions).map(([id, name]) => ({
+      id: "editor-" + id,
+      name: "Редактор: " + name,
+      run: () => {
+        if (!current || !/\.md$/i.test(current.path)) return;
+        if (!runEditorAction(current.path, workspace.activePane, id))
+          error("Переключитесь в режим редактирования");
+      },
+    })),
+  );
+  for (const command of commands)
+    command.hint =
+      (effectiveHotkeys(preferences?.hotkeys || {})[command.id] || [])
+        .map((shortcut) => shortcutLabel(shortcut, isMac))
+        .join(", ") || undefined;
   const [installedPlugins, setInstalledPlugins] = useState<PluginInfo[]>([]);
   const pluginCommands: Command[] = installedPlugins
     .filter((p) => p.enabled)
@@ -559,6 +824,18 @@ export default function App() {
   }, [settings]);
   actionRef.current = (action: string) => {
     if (updatingRef.current) return;
+    if (action === "tab-close") {
+      if (active) void workspace.close(active);
+      return;
+    }
+    if (action === "navigation-back" || action === "navigation-forward") {
+      const next = historyPosition.current + (action === "navigation-back" ? -1 : 1);
+      if (next >= 0 && next < openHistory.current.length) {
+        historyPosition.current = next;
+        void open(openHistory.current[next]);
+      }
+      return;
+    }
     if (action === "home") {
       setHome(true);
       setCollection(null);
@@ -633,21 +910,34 @@ export default function App() {
     })) || [];
   const backlinks = backlinksByPath.get(current?.path || "") || [];
   const footnotes = current?.content.match(/^\[\^[^\]]+\]:.+$/gm) || [];
-  const setProperty = (key: string, value: string) => {
+  const setProperty = (key: string, value: string | undefined, type?: PropertyType) => {
     if (!current) return;
-    const { properties, body } = frontmatter(current.content);
-    if (["__proto__", "constructor", "prototype"].includes(key)) return;
-    let parsed: unknown = value;
     try {
-      parsed = yamlParse(value, { maxAliasCount: 10 });
-    } catch {}
-    workspace.edit(
-      current.path,
-      "---\n" +
-        yamlStringify({ ...properties, [key]: parsed }).trimEnd() +
-        "\n---\n" +
-        body,
-    );
+      if (value === undefined) {
+        workspace.edit(current.path, editFrontmatter(current.content, { remove: [key] }));
+        return;
+      }
+      let parsed: unknown = value;
+      if (type) {
+        let input: unknown = value;
+        if (["list", "tags"].includes(type)) {
+          try {
+            const list = yamlParse(value, { maxAliasCount: 10 });
+            if (Array.isArray(list)) input = list;
+          } catch {}
+        }
+        parsed = parseProperty(input, type);
+      } else
+        try {
+          parsed = yamlParse(value, { maxAliasCount: 10 });
+        } catch {}
+      workspace.edit(
+        current.path,
+        editFrontmatter(current.content, { set: { [key]: parsed } }),
+      );
+    } catch (e: any) {
+      error(e.message);
+    }
   };
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1179px)");
@@ -664,6 +954,7 @@ export default function App() {
     setFileFilter("all");
     setSection("files");
     setRecentOpen(false);
+    if (vault?.preferences.dailyOpenOnStartup) void daily();
   }, [vault?.root]);
   const vaultPaths = useMemo(
     () => vault?.files.filter((f) => f.kind !== "folder").map((f) => f.path) || [],
@@ -678,490 +969,600 @@ export default function App() {
     );
   return (
     <VaultFilesContext.Provider value={vaultPaths}>
-      <div className="app-shell">
-        {updating && (
-          <div className="update-lock" role="status">
-            <Clock3 size={20} />
-            <p>Сохраняем заметки и перезапускаем приложение…</p>
-          </div>
-        )}
-        <WindowTabs
-          tabs={tabs}
-          active={active}
-          vaultOpen={!!vault}
-          documentVisible={!!current && !home && !graph && !collection}
-          inspectorAvailable={!!current && /\.md$/i.test(current.path)}
-          inspectorOpen={right}
-          onInspector={() => setRight((v) => !v)}
-          onSearch={quickOpen}
-          onClose={(path) => run(() => workspace.close(path))}
-          onOpen={(path) => {
-            workspace.setActive(path);
-            setGraph(false);
-            setHome(false);
-            setCollection(null);
-          }}
-        />
-        {!vault ? (
-          <Welcome
-            recent={state.recent}
-            onCreate={() => run(() => chooseVault(true))}
-            onOpen={() => run(() => chooseVault(false))}
-            onImport={importVault}
-            onRecent={(root) =>
-              run(async () => workspace.switchVault(await api().openRecent(root)))
+      <VaultRuntimeContext.Provider
+        value={{
+          files: vault?.files || [],
+          types: vault?.preferences.propertyTypes || {},
+          flush: workspace.flush,
+        }}
+      >
+        <div className="app-shell">
+          {updating && (
+            <div className="update-lock" role="status">
+              <Clock3 size={20} />
+              <p>Сохраняем заметки и перезапускаем приложение…</p>
+            </div>
+          )}
+          <WindowTabs
+            tabs={tabs}
+            active={active}
+            vaultOpen={!!vault}
+            documentVisible={!!current && !home && !graph && !collection}
+            inspectorAvailable={!!current && /\.md$/i.test(current.path)}
+            inspectorOpen={right}
+            onInspector={() => setRight((v) => !v)}
+            onSearch={quickOpen}
+            onPin={workspace.pinTab}
+            onReorder={workspace.reorderTab}
+            onCloseOthers={(path, side) =>
+              void run(() => workspace.closeTabs(path, side))
             }
+            onClose={(path) => run(() => workspace.close(path))}
+            onOpen={(path) => {
+              workspace.setActive(path);
+              setGraph(false);
+              setHome(false);
+              setCollection(null);
+            }}
           />
-        ) : (
-          <>
-            <div className="main-layout">
-              <Sidebar
-                key={vault.root}
-                vault={vault}
-                index={index}
-                active={active}
-                onOpen={open}
-                onAction={(a) => actionRef.current(a)}
-                onFileAction={fileAction}
-                section={section}
-                setSection={setSection}
-                view={
-                  graph
-                    ? "graph"
-                    : collection
-                      ? "collection"
-                      : home || !current
-                        ? "home"
-                        : "document"
-                }
-                filter={fileFilter}
-                setFilter={(filter) => {
-                  setFileFilter(filter);
-                  setCollection(filter);
-                  setHome(false);
-                  setGraph(false);
-                }}
-              />
-              {recentOpen && (
-                <div className="vault-menu">
-                  <strong>Хранилища</strong>
-                  {state.recent.map((r) => (
-                    <button
-                      key={r.root}
-                      onClick={() =>
-                        run(async () => {
-                          await flushForVaultChange();
-                          await workspace.switchVault(await api().openRecent(r.root));
-                          setRecentOpen(false);
-                        })
+          {!vault ? (
+            <Welcome
+              recent={state.recent}
+              onCreate={() => run(() => chooseVault(true))}
+              onOpen={() => run(() => chooseVault(false))}
+              onImport={importVault}
+              onRecent={(root) =>
+                run(async () => workspace.switchVault(await api().openRecent(root)))
+              }
+            />
+          ) : (
+            <>
+              <div className="main-layout">
+                <Sidebar
+                  key={vault.root}
+                  vault={vault}
+                  index={index}
+                  active={active}
+                  onOpen={open}
+                  onAction={(a) => actionRef.current(a)}
+                  onFileAction={fileAction}
+                  onMove={(path, to) =>
+                    void run(async () => {
+                      await workspace.flush();
+                      await api().rename(path, to);
+                      await workspace.renameTab(path, to);
+                      await workspace.refresh();
+                    })
+                  }
+                  section={section}
+                  setSection={setSection}
+                  view={
+                    graph
+                      ? "graph"
+                      : collection
+                        ? "collection"
+                        : home || !current
+                          ? "home"
+                          : "document"
+                  }
+                  requestedSearch={requestedSearch}
+                  onBookmarkOpen={openBookmark}
+                  onBookmarksChange={saveBookmarks}
+                  onSaveSearch={saveSearch}
+                  pluginButtons={
+                    <PluginButtons
+                      plugins={installedPlugins}
+                      execute={(id, command) =>
+                        void run(() => api().executePlugin(id, command))
                       }
-                    >
-                      <FolderOpen size={15} />
-                      {r.name}
+                    />
+                  }
+                  filter={fileFilter}
+                  setFilter={(filter) => {
+                    setFileFilter(filter);
+                    setCollection(filter);
+                    setHome(false);
+                    setGraph(false);
+                  }}
+                />
+                {recentOpen && (
+                  <div className="vault-menu">
+                    <strong>Хранилища</strong>
+                    {state.recent.map((r) => (
+                      <button
+                        key={r.root}
+                        onClick={() =>
+                          run(async () => {
+                            await flushForVaultChange();
+                            await workspace.switchVault(await api().openRecent(r.root));
+                            setRecentOpen(false);
+                          })
+                        }
+                      >
+                        <FolderOpen size={15} />
+                        {r.name}
+                      </button>
+                    ))}
+                    <hr />
+                    <button onClick={() => run(() => chooseVault(true))}>
+                      Создать хранилище…
                     </button>
-                  ))}
-                  <hr />
-                  <button onClick={() => run(() => chooseVault(true))}>
-                    Создать хранилище…
-                  </button>
-                  <button onClick={() => run(() => chooseVault(false))}>
-                    Открыть папку…
-                  </button>
-                  <button
-                    onClick={() => {
-                      setRecentOpen(false);
-                      importVault();
+                    <button onClick={() => run(() => chooseVault(false))}>
+                      Открыть папку…
+                    </button>
+                    <button
+                      onClick={() => {
+                        setRecentOpen(false);
+                        importVault();
+                      }}
+                    >
+                      Импорт из папки…
+                    </button>
+                  </div>
+                )}
+                <main className="workspace">
+                  <DocumentBoundary
+                    key={vault.root + graph + home + collection}
+                    onSource={() => {
+                      setGraph(false);
+                      setMode("source");
                     }}
                   >
-                    Импорт из папки…
-                  </button>
-                </div>
-              )}
-              <main className="workspace">
-                <DocumentBoundary
-                  key={vault.root + graph + home + collection}
-                  onSource={() => {
-                    setGraph(false);
-                    setMode("source");
-                  }}
-                >
-                  <Suspense
-                    fallback={<div className="panel-loading">Загрузка инструмента…</div>}
-                  >
-                    {graph ? (
-                      <Graph index={index} active={active} onOpen={open} />
-                    ) : collection ? (
-                      <FileCollection
-                        key={collection}
-                        kind={collection}
-                        files={vault.files}
-                        index={index}
-                        onOpen={open}
-                        onCreate={(action) => actionRef.current(action)}
-                      />
-                    ) : current && !home ? (
-                      <PaneTree
-                        layout={workspace.layout}
-                        activePane={workspace.activePane}
-                        onFocus={workspace.focusPane}
-                        onResize={workspace.resizePane}
-                        renderPane={(pane) => {
-                          const current = tabs.find((t) => t.path === pane.path);
-                          if (!current)
+                    <Suspense
+                      fallback={
+                        <div className="panel-loading">Загрузка инструмента…</div>
+                      }
+                    >
+                      {graph ? (
+                        <Graph
+                          files={vault.files}
+                          options={preferences!.graph}
+                          onOptions={(graph) =>
+                            void run(async () =>
+                              updatePreferences(await api().preferences({ graph })),
+                            )
+                          }
+                          index={index}
+                          active={active}
+                          onOpen={(path) => {
+                            if (path.startsWith("#")) {
+                              setSection("search");
+                              setRequestedSearch({
+                                query: "tag:" + path.slice(1),
+                                id: Date.now(),
+                              });
+                            } else if (path.startsWith("?")) openLink(path.slice(1));
+                            else void open(path);
+                          }}
+                          bookmark={graphBookmark}
+                          onBookmark={(query, local) =>
+                            addBookmark({
+                              id: crypto.randomUUID(),
+                              title: "",
+                              type: "graph",
+                              query,
+                              ...(local ? { local } : {}),
+                            })
+                          }
+                        />
+                      ) : collection ? (
+                        <FileCollection
+                          key={collection}
+                          kind={collection}
+                          files={vault.files}
+                          index={index}
+                          onOpen={open}
+                          onCreate={(action) => actionRef.current(action)}
+                        />
+                      ) : current && !home ? (
+                        <PaneTree
+                          layout={workspace.layout}
+                          activePane={workspace.activePane}
+                          onFocus={workspace.focusPane}
+                          onResize={workspace.resizePane}
+                          renderPane={(pane) => {
+                            const current = tabs.find((t) => t.path === pane.path);
+                            if (!current)
+                              return (
+                                <div className="empty-pane">
+                                  <p>Откройте файл в этой панели</p>
+                                  <button onClick={quickOpen}>Выбрать файл</button>
+                                  {leaves(workspace.layout).length > 1 && (
+                                    <button onClick={() => workspace.closePane(pane.id)}>
+                                      Закрыть панель
+                                    </button>
+                                  )}
+                                </div>
+                              );
                             return (
-                              <div className="empty-pane">
-                                <p>Откройте файл в этой панели</p>
-                                <button onClick={quickOpen}>Выбрать файл</button>
-                                {leaves(workspace.layout).length > 1 && (
-                                  <button onClick={() => workspace.closePane(pane.id)}>
-                                    Закрыть панель
-                                  </button>
-                                )}
-                              </div>
+                              <DocumentPane
+                                current={current}
+                                pane={pane}
+                                workspace={workspace}
+                                index={index}
+                                preferences={preferences!}
+                                vault={vault}
+                                open={open}
+                                openLink={openLink}
+                                bookmark={bookmark}
+                                commands={commands}
+                                setDialog={setDialog}
+                                setPalette={setPalette}
+                                setSelection={setSelection}
+                                canGoBack={historyPosition.current > 0}
+                                onBack={() => {
+                                  if (historyPosition.current > 0) {
+                                    historyPosition.current--;
+                                    run(() =>
+                                      workspace.open(
+                                        openHistory.current[historyPosition.current],
+                                        pane.id,
+                                      ),
+                                    );
+                                  }
+                                }}
+                              />
                             );
-                          return (
-                            <DocumentPane
-                              current={current}
-                              pane={pane}
-                              workspace={workspace}
-                              index={index}
-                              preferences={preferences!}
-                              vault={vault}
-                              open={open}
-                              openLink={openLink}
-                              bookmark={bookmark}
-                              commands={commands}
-                              setDialog={setDialog}
-                              setPalette={setPalette}
-                              setSelection={setSelection}
-                              canGoBack={historyPosition.current > 0}
-                              onBack={() => {
-                                if (historyPosition.current > 0) {
-                                  historyPosition.current--;
-                                  run(() =>
-                                    workspace.open(
-                                      openHistory.current[historyPosition.current],
-                                      pane.id,
-                                    ),
-                                  );
-                                }
-                              }}
-                            />
-                          );
-                        }}
-                      />
-                    ) : (
-                      <WorkspaceHome
-                        vault={vault}
-                        recentPaths={tabs.map((tab) => tab.path)}
-                        onOpen={open}
-                        onAction={(action) => actionRef.current(action)}
-                      />
-                    )}
-                  </Suspense>
-                </DocumentBoundary>
-              </main>
-              {right &&
-                current &&
-                /\.md$/i.test(current.path) &&
-                !home &&
-                !graph &&
-                !collection && (
-                  <Inspector
-                    currentIndex={currentIndex}
-                    currentPath={current?.path || null}
-                    mode={mode}
-                    backlinks={backlinks}
-                    outgoing={outgoing}
-                    footnotes={footnotes}
-                    open={open}
-                    openLink={openLink}
-                    setSection={setSection}
-                    setProperty={setProperty}
-                    setDialog={setDialog}
-                    onClose={() => setRight(false)}
-                  />
-                )}
-            </div>
-            <footer className="statusbar">
-              <div
-                className={
-                  "save-state " +
-                  (tabs.some((t) => t.error)
-                    ? "has-error"
-                    : tabs.some((t) => t.dirty)
-                      ? "is-pending"
-                      : "")
-                }
-                aria-live="polite"
-              >
-                <span
-                  className="status-dot"
-                  title={
-                    tabs.some((t) => t.error)
-                      ? "Ошибка сохранения"
-                      : tabs.some((t) => t.dirty)
-                        ? "Сохранение"
-                        : "Сохранено"
-                  }
-                />
-                {tabs.some((t) => t.error)
-                  ? "Ошибка сохранения"
-                  : tabs.some((t) => t.dirty)
-                    ? "Сохранение…"
-                    : ""}
-                {recording && (
-                  <button
-                    className="recording-text"
-                    onClick={() => actionRef.current("record")}
-                  >
-                    Остановить запись
-                  </button>
-                )}
-              </div>
-              <div>
-                <button
-                  onClick={sync}
-                  aria-label="Синхронизировать"
-                  title={
-                    state.sync.error ||
-                    (state.sync.configured
-                      ? "Синхронизировать"
-                      : "Подключить GitHub Sync")
-                  }
-                  className={state.sync.error ? "sync-failed" : ""}
-                >
-                  <GitBranch size={12} />
-                  {syncing
-                    ? "Синхронизация…"
-                    : state.sync.error
-                      ? "Ошибка синхронизации"
-                      : ""}
-                </button>
-                {current &&
+                          }}
+                        />
+                      ) : (
+                        <WorkspaceHome
+                          vault={vault}
+                          recentPaths={tabs.map((tab) => tab.path)}
+                          onOpen={open}
+                          onAction={(action) => actionRef.current(action)}
+                        />
+                      )}
+                    </Suspense>
+                  </DocumentBoundary>
+                </main>
+                {right &&
+                  current &&
                   /\.md$/i.test(current.path) &&
                   !home &&
                   !graph &&
                   !collection && (
-                    <>
-                      <span>
-                        {plural(currentIndex?.words || 0, ["слово", "слова", "слов"])}
-                      </span>
-                      <span>
-                        {plural(current.content.length, [
-                          "символ",
-                          "символа",
-                          "символов",
-                        ])}
-                      </span>
-                    </>
+                    <Inspector
+                      currentIndex={currentIndex}
+                      currentPath={current?.path || null}
+                      mode={mode}
+                      onLinkMention={(mention) =>
+                        run(async () => {
+                          await workspace.flush();
+                          await api().linkMention(mention);
+                          await workspace.refresh();
+                        })
+                      }
+                      onRevealLine={(path, line) => {
+                        void run(async () => {
+                          await open(path);
+                          workspace.setPaneMode("source");
+                          await navigateToNote(
+                            path,
+                            workspace.activePane,
+                            "source",
+                            "",
+                            line,
+                          );
+                        });
+                      }}
+                      backlinks={backlinks}
+                      outgoing={outgoing}
+                      footnotes={footnotes}
+                      open={open}
+                      openLink={openLink}
+                      setSection={setSection}
+                      setProperty={setProperty}
+                      propertySchema={preferences!.propertyTypes}
+                      setPropertyType={(key, type) =>
+                        void run(async () =>
+                          updatePreferences(
+                            await api().preferences({
+                              propertyTypes: {
+                                ...preferences!.propertyTypes,
+                                [key]: type,
+                              },
+                            }),
+                          ),
+                        )
+                      }
+                      onAllProperties={() =>
+                        void run(async () => {
+                          await workspace.flush();
+                          setPropertiesOpen(true);
+                        })
+                      }
+                      setDialog={setDialog}
+                      onClose={() => setRight(false)}
+                    />
                   )}
               </div>
-            </footer>
-          </>
-        )}
-        {settings && preferences && (
-          <Suspense fallback={null}>
-            <Settings
-              version={state.version}
-              onInstallUpdate={async () => {
-                if (recording || audioSave.current)
-                  throw Error("Сначала завершите запись и дождитесь её сохранения");
-                const update = await api().updateState();
-                if (update.automatic) {
-                  updatingRef.current = true;
-                  setUpdating(true);
-                }
-                try {
-                  await workspace.flush();
-                  await api().installUpdate();
-                } catch (error) {
-                  updatingRef.current = false;
-                  setUpdating(false);
-                  throw error;
-                }
-              }}
-              preferences={preferences}
-              initialTab={settingsTab}
-              sync={state.sync}
-              onPreferences={updatePreferences}
-              onSync={workspace.updateSync}
-              onClose={() => setSettings(false)}
-              onError={error}
-              onMessage={message}
-              onImport={() => {
-                setSettings(false);
-                importVault();
+              <footer className="statusbar">
+                <PluginStatus
+                  plugins={installedPlugins}
+                  execute={(id, command) =>
+                    void run(() => api().executePlugin(id, command))
+                  }
+                />
+                <div
+                  className={
+                    "save-state " +
+                    (tabs.some((t) => t.error)
+                      ? "has-error"
+                      : tabs.some((t) => t.dirty)
+                        ? "is-pending"
+                        : "")
+                  }
+                  aria-live="polite"
+                >
+                  <span
+                    className="status-dot"
+                    title={
+                      tabs.some((t) => t.error)
+                        ? "Ошибка сохранения"
+                        : tabs.some((t) => t.dirty)
+                          ? "Сохранение"
+                          : "Сохранено"
+                    }
+                  />
+                  {tabs.some((t) => t.error)
+                    ? "Ошибка сохранения"
+                    : tabs.some((t) => t.dirty)
+                      ? "Сохранение…"
+                      : ""}
+                  {recording && (
+                    <button
+                      className="recording-text"
+                      onClick={() => actionRef.current("record")}
+                    >
+                      Остановить запись
+                    </button>
+                  )}
+                </div>
+                <div>
+                  <button
+                    onClick={sync}
+                    aria-label="Синхронизировать"
+                    title={
+                      state.sync.error ||
+                      (state.sync.configured
+                        ? "Синхронизировать"
+                        : "Подключить GitHub Sync")
+                    }
+                    className={state.sync.error ? "sync-failed" : ""}
+                  >
+                    <GitBranch size={12} />
+                    {syncing
+                      ? "Синхронизация…"
+                      : state.sync.error
+                        ? "Ошибка синхронизации"
+                        : ""}
+                  </button>
+                  {current &&
+                    /\.md$/i.test(current.path) &&
+                    !home &&
+                    !graph &&
+                    !collection && (
+                      <>
+                        <span>
+                          {plural(currentIndex?.words || 0, ["слово", "слова", "слов"])}
+                        </span>
+                        <span>
+                          {plural(current.content.length, [
+                            "символ",
+                            "символа",
+                            "символов",
+                          ])}
+                        </span>
+                      </>
+                    )}
+                </div>
+              </footer>
+            </>
+          )}
+          {settings && preferences && (
+            <Suspense fallback={null}>
+              <Settings
+                commands={[
+                  ...commands,
+                  ...pluginCommands,
+                  { id: "commands", name: "Палитра команд" },
+                  { id: "settings", name: "Настройки" },
+                  { id: "tab-close", name: "Закрыть вкладку" },
+                  { id: "navigation-back", name: "Перейти назад" },
+                  { id: "navigation-forward", name: "Перейти вперёд" },
+                ]}
+                version={state.version}
+                onInstallUpdate={async () => {
+                  if (recording || audioSave.current)
+                    throw Error("Сначала завершите запись и дождитесь её сохранения");
+                  const update = await api().updateState();
+                  if (update.automatic) {
+                    updatingRef.current = true;
+                    setUpdating(true);
+                  }
+                  try {
+                    await workspace.flush();
+                    await api().installUpdate();
+                  } catch (error) {
+                    updatingRef.current = false;
+                    setUpdating(false);
+                    throw error;
+                  }
+                }}
+                preferences={preferences}
+                initialTab={settingsTab}
+                sync={state.sync}
+                onPreferences={updatePreferences}
+                onSync={workspace.updateSync}
+                onClose={() => setSettings(false)}
+                onError={error}
+                onMessage={message}
+                onImport={() => {
+                  setSettings(false);
+                  importVault();
+                }}
+              />
+            </Suspense>
+          )}
+          {palette && (
+            <CommandPalette
+              commands={
+                palette.scope === "commands"
+                  ? [...commands, ...pluginCommands].map((command) => ({
+                      ...command,
+                      run: () => {
+                        palette.onPick?.();
+                        setTimeout(() => command.run(), 0);
+                      },
+                    }))
+                  : palette.commands
+              }
+              placeholder={palette.placeholder}
+              onClose={() => setPalette(null)}
+            />
+          )}
+          {propertiesOpen && (
+            <PropertiesManager
+              index={index}
+              types={preferences!.propertyTypes}
+              onClose={() => setPropertiesOpen(false)}
+              onOpen={open}
+              onRefresh={workspace.refresh}
+              onTypes={async (propertyTypes) =>
+                updatePreferences(await api().preferences({ propertyTypes }))
+              }
+            />
+          )}
+          {composer && (
+            <NoteComposer
+              state={composer}
+              paths={index.map((note) => note.path)}
+              onClose={() => setComposer(null)}
+              onSubmit={async (request) => {
+                await workspace.flush();
+                const result = await api().compose(request);
+                if (result.removed) await workspace.close(request.source);
+                await workspace.refresh();
+                await open(result.target);
+                message("Текст перенесён. Предыдущие версии доступны в истории");
               }}
             />
-          </Suspense>
-        )}
-        {palette && (
-          <CommandPalette
-            commands={
-              palette.scope === "commands"
-                ? [...commands, ...pluginCommands].map((command) => ({
-                    ...command,
-                    run: () => {
-                      palette.onPick?.();
-                      setTimeout(() => command.run(), 0);
-                    },
-                  }))
-                : palette.commands
-            }
-            placeholder={palette.placeholder}
-            onClose={() => setPalette(null)}
-          />
-        )}
-        {dialog && (
-          <Dialog
-            key={dialog.title + dialog.initial}
-            data={dialog}
-            onClose={() => setDialog(null)}
-            onError={error}
-          />
-        )}
-        {history && current && (
-          <div className="overlay">
-            <div className="modal history-modal">
-              <div className="modal-title">
-                <h2>История · {current.path}</h2>
-                <button className="icon-button" onClick={() => setHistory(null)}>
-                  <X size={18} />
-                </button>
-              </div>
-              <div className="history-body">
-                <div>
-                  {history.map((item) => (
-                    <div key={item.id} className="history-entry">
-                      <button
-                        className="history-select"
-                        onClick={() =>
-                          run(async () =>
-                            setHistoryPreview(
-                              await api().historyRead(current.path, item.id),
-                            ),
-                          )
-                        }
-                      >
-                        <Clock3 size={14} />
-                        <span>
-                          {new Date(item.at).toLocaleString("ru-RU")}
-                          <small>{plural(item.size, ["байт", "байта", "байт"])}</small>
-                        </span>
-                      </button>
-                      <button
-                        onClick={() =>
-                          run(async () => {
-                            await workspace.flush();
-                            await api().historyRestore(current.path, item.id);
-                            await workspace.refresh();
-                            setHistory(null);
-                            message("Версия восстановлена");
-                          })
-                        }
-                      >
-                        Восстановить
-                      </button>
-                    </div>
-                  ))}
-                  {!history.length && (
-                    <p className="empty-small">Версии появятся после изменений</p>
-                  )}
-                </div>
-                <pre>{historyPreview || "Выберите версию для просмотра"}</pre>
-              </div>
-            </div>
-          </div>
-        )}
-        {trash && (
-          <div className="overlay">
-            <div className="modal trash-modal">
-              <div className="modal-title">
-                <h2>Корзина</h2>
-                <button className="icon-button" onClick={() => setTrash(null)}>
-                  <X size={18} />
-                </button>
-              </div>
-              {trash.map((item) => (
-                <div className="trash-row" key={item.id}>
-                  <div>
-                    <strong>{item.path}</strong>
-                    <small>{new Date(item.at).toLocaleString("ru-RU")}</small>
-                  </div>
-                  <button
-                    onClick={() =>
-                      run(async () => {
-                        await api().restoreTrash(item.id);
-                        setTrash(await api().trashList());
-                        await workspace.refresh();
-                        message("Файл восстановлен");
-                      })
-                    }
-                  >
-                    Восстановить
+          )}
+          {dialog && (
+            <Dialog
+              key={dialog.title + dialog.initial}
+              data={dialog}
+              onClose={() => setDialog(null)}
+              onError={error}
+            />
+          )}
+          {history && current && (
+            <div className="overlay">
+              <div className="modal history-modal">
+                <div className="modal-title">
+                  <h2>История · {current.path}</h2>
+                  <button className="icon-button" onClick={() => setHistory(null)}>
+                    <X size={18} />
                   </button>
                 </div>
-              ))}
-              {!trash.length && <p className="empty-small">Корзина пуста</p>}
+                <div className="history-body">
+                  <div>
+                    {history.map((item) => (
+                      <div key={item.id} className="history-entry">
+                        <button
+                          className="history-select"
+                          onClick={() =>
+                            run(async () =>
+                              setHistoryPreview(
+                                await api().historyRead(current.path, item.id),
+                              ),
+                            )
+                          }
+                        >
+                          <Clock3 size={14} />
+                          <span>
+                            {new Date(item.at).toLocaleString("ru-RU")}
+                            <small>{plural(item.size, ["байт", "байта", "байт"])}</small>
+                          </span>
+                        </button>
+                        <button
+                          onClick={() =>
+                            run(async () => {
+                              await workspace.flush();
+                              await api().historyRestore(current.path, item.id);
+                              await workspace.refresh();
+                              setHistory(null);
+                              message("Версия восстановлена");
+                            })
+                          }
+                        >
+                          Восстановить
+                        </button>
+                      </div>
+                    ))}
+                    {!history.length && (
+                      <p className="empty-small">Версии появятся после изменений</p>
+                    )}
+                  </div>
+                  <pre>{historyPreview || "Выберите версию для просмотра"}</pre>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
-        {slides !== null && current && (
-          <div
-            className="slides-overlay"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowRight")
-                setSlides((i) =>
-                  Math.min((i || 0) + 1, current.content.split(/^---$/m).length - 1),
-                );
-              if (e.key === "ArrowLeft") setSlides((i) => Math.max(0, (i || 0) - 1));
-            }}
-          >
-            <button className="slides-close icon-button" onClick={() => setSlides(null)}>
-              <X size={24} />
-            </button>
-            <div className="slide">
-              <Markdown
-                content={frontmatter(current.content).body.split(/^---$/m)[slides] || ""}
-                path={current.path}
-                index={index}
-                onLink={openLink}
-              />
+          )}
+          {trash && (
+            <div className="overlay">
+              <div className="modal trash-modal">
+                <div className="modal-title">
+                  <h2>Корзина</h2>
+                  <button className="icon-button" onClick={() => setTrash(null)}>
+                    <X size={18} />
+                  </button>
+                </div>
+                {trash.map((item) => (
+                  <div className="trash-row" key={item.id}>
+                    <div>
+                      <strong>{item.path}</strong>
+                      <small>{new Date(item.at).toLocaleString("ru-RU")}</small>
+                    </div>
+                    <button
+                      onClick={() =>
+                        run(async () => {
+                          await api().restoreTrash(item.id);
+                          setTrash(await api().trashList());
+                          await workspace.refresh();
+                          message("Файл восстановлен");
+                        })
+                      }
+                    >
+                      Восстановить
+                    </button>
+                  </div>
+                ))}
+                {!trash.length && <p className="empty-small">Корзина пуста</p>}
+              </div>
             </div>
-            <div className="slides-controls">
-              <button onClick={() => setSlides((i) => Math.max(0, (i || 0) - 1))}>
-                ←
+          )}
+          {slides !== null && current && (
+            <Slides
+              content={current.content}
+              path={current.path}
+              index={index}
+              onLink={openLink}
+              onClose={() => setSlides(null)}
+            />
+          )}
+          {toast && (
+            <div className={"toast " + (toast.error ? "error" : "")} role="status">
+              {toast.error ? <span>!</span> : <Check size={17} />}
+              <p>{toast.message}</p>
+              <button className="icon-button" onClick={() => setToast(null)}>
+                <X size={15} />
               </button>
-              <span>
-                {slides + 1} / {frontmatter(current.content).body.split(/^---$/m).length}
-              </span>
-              <button
-                onClick={() =>
-                  setSlides((i) =>
-                    Math.min(
-                      (i || 0) + 1,
-                      frontmatter(current.content).body.split(/^---$/m).length - 1,
-                    ),
-                  )
-                }
-              >
-                →
-              </button>
             </div>
-          </div>
-        )}
-        {toast && (
-          <div className={"toast " + (toast.error ? "error" : "")} role="status">
-            {toast.error ? <span>!</span> : <Check size={17} />}
-            <p>{toast.message}</p>
-            <button className="icon-button" onClick={() => setToast(null)}>
-              <X size={15} />
-            </button>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </VaultRuntimeContext.Provider>
     </VaultFilesContext.Provider>
   );
 }

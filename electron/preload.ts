@@ -10,6 +10,8 @@ const methods = [
   "write",
   "create",
   "mkdir",
+  "compose",
+  "updateProperties",
   "rename",
   "trash",
   "trashList",
@@ -19,6 +21,8 @@ const methods = [
   "historyRestore",
   "search",
   "index",
+  "mentions",
+  "linkMention",
   "importAttachments",
   "saveAudio",
   "preferences",
@@ -28,6 +32,9 @@ const methods = [
   "reveal",
   "openExternal",
   "openAttachment",
+  "remoteImage",
+  "readAttachment",
+  "copyText",
   "syncStatus",
   "syncConnect",
   "syncDisconnect",
@@ -48,6 +55,10 @@ const methods = [
   "webCardClose",
   "catalog",
   "catalogInstall",
+  "styles",
+  "installStyle",
+  "saveStyle",
+  "removeStyle",
   "themes",
   "installTheme",
   "removeTheme",
@@ -60,6 +71,8 @@ const methods = [
   "workspaceSave",
   "saveSession",
   "workspaces",
+  "workspaceRename",
+  "workspaceDelete",
 ] as const;
 const api: Record<string, any> = Object.fromEntries(
   methods.map((method) => [
@@ -73,7 +86,20 @@ function subscribe(channel: string, callback: (...args: any[]) => void) {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 api.onUpdateState = (callback: any) => subscribe("updates:state", callback);
-api.onPluginAction = (callback: any) => subscribe("plugins:action", callback);
+api.onPluginAction = (callback: any) =>
+  subscribe("plugins:action", async (action: unknown, request?: string) => {
+    try {
+      await callback(action);
+      if (request) ipcRenderer.send("plugins:action-result", request, null);
+    } catch (error) {
+      if (request)
+        ipcRenderer.send(
+          "plugins:action-result",
+          request,
+          error instanceof Error ? error.message : "Ошибка действия расширения",
+        );
+    }
+  });
 api.onPluginsChanged = (callback: any) => subscribe("plugins:changed", callback);
 api.onChange = (callback: any) => subscribe("vault:changed", callback);
 api.onMenu = (callback: any) => subscribe("app:menu", callback);

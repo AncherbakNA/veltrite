@@ -8,28 +8,38 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { useState } from "react";
-import { stringify as yamlStringify } from "yaml";
+import { useEffect, useState } from "react";
+import { headingSlugger } from "../../shared/markdown-blocks";
+import type { UnlinkedMention } from "../../shared/mentions";
+import { propertyType, propertyTypes, type PropertyType } from "../../shared/properties";
 import type { NoteIndex } from "../../shared/types";
+import { api } from "../useVault";
 import type { DialogData } from "./Dialog";
+import PropertyField from "./PropertyField";
 interface InspectorProps {
   currentIndex: NoteIndex | null;
   currentPath: string | null;
   mode: string;
+  onLinkMention: (mention: UnlinkedMention) => Promise<unknown>;
+  onRevealLine: (path: string, line: number) => void;
   backlinks: NoteIndex[];
   outgoing: { target: string; resolved: string | null }[];
   footnotes: string[];
   open: (path: string) => unknown;
   openLink: (target: string) => void;
   setSection: (section: string) => void;
-  setProperty: (key: string, value: string) => void;
+  setProperty: (key: string, value: string | undefined, type?: PropertyType) => void;
+  propertySchema: Record<string, PropertyType>;
+  setPropertyType: (key: string, type: PropertyType) => void;
+  onAllProperties: () => void;
   setDialog: (dialog: DialogData) => void;
   onClose: () => void;
 }
 export default function Inspector({
   currentIndex,
   currentPath,
-  mode,
+  onLinkMention,
+  onRevealLine,
   backlinks,
   outgoing,
   footnotes,
@@ -37,6 +47,9 @@ export default function Inspector({
   openLink,
   setSection,
   setProperty,
+  propertySchema,
+  setPropertyType,
+  onAllProperties,
   setDialog,
   onClose,
 }: InspectorProps) {
@@ -44,9 +57,71 @@ export default function Inspector({
     outline: true,
     links: true,
   });
+  const [mentions, setMentions] = useState<{
+      incoming: UnlinkedMention[];
+      outgoing: UnlinkedMention[];
+      truncated: boolean;
+    } | null>(null),
+    [mentionsError, setMentionsError] = useState(""),
+    [revision, setRevision] = useState(0),
+    [linking, setLinking] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setMentions(null);
+    setMentionsError("");
+    if (currentPath && sections.unlinked)
+      api()
+        .mentions(currentPath)
+        .then(
+          (value) => {
+            if (alive) setMentions(value);
+          },
+          (e) => {
+            if (alive) setMentionsError(e.message);
+          },
+        );
+    return () => {
+      alive = false;
+    };
+  }, [currentPath, sections.unlinked, revision]);
+  const slug = headingSlugger();
+  const headingIds = currentIndex?.headings.map((heading) => slug(heading.text)) || [];
+  const renderMentions = (values: UnlinkedMention[]) =>
+    values.map((mention, i) => (
+      <div className="mention-row" key={mention.path + mention.from + i}>
+        <button
+          className="mention-context"
+          onClick={() => onRevealLine(mention.path, mention.line)}
+        >
+          <strong>
+            {mention.path === currentPath
+              ? mention.target.replace(/\.md$/i, "")
+              : mention.path.replace(/\.md$/i, "")}
+          </strong>
+          <span>{mention.context}</span>
+          <small>Строка {mention.line}</small>
+        </button>
+        <button
+          className="text-link"
+          disabled={linking}
+          onClick={async () => {
+            setLinking(true);
+            try {
+              await onLinkMention(mention);
+              setRevision((value) => value + 1);
+            } finally {
+              setLinking(false);
+            }
+          }}
+        >
+          Связать
+        </button>
+      </div>
+    ));
   const tabs = [
     ["outline", AlignLeft, "Содержание"],
     ["links", Link2, "Обратные ссылки"],
+    ["unlinked", Link2, "Несвязанные упоминания"],
     ["properties", SlidersHorizontal, "Свойства"],
     ["footnotes", Hash, "Сноски"],
   ] as const;
@@ -87,24 +162,7 @@ export default function Inspector({
                           className="outline-row"
                           key={i}
                           style={{ paddingLeft: (h.level - 1) * 12 }}
-                          onClick={() => {
-                            if (mode === "read")
-                              document
-                                .getElementById(h.text.toLowerCase().replace(/\s/g, "-"))
-                                ?.scrollIntoView({
-                                  behavior: window.matchMedia(
-                                    "(prefers-reduced-motion: reduce)",
-                                  ).matches
-                                    ? "auto"
-                                    : "smooth",
-                                });
-                            else
-                              window.dispatchEvent(
-                                new CustomEvent("veltrite:goto", {
-                                  detail: h.line,
-                                }),
-                              );
-                          }}
+                          onClick={() => openLink("#" + headingIds[i])}
                         >
                           {h.text}
                         </button>
@@ -160,27 +218,85 @@ export default function Inspector({
                     ))}
                   </>
                 )}
+                {id === "unlinked" && (
+                  <>
+                    <button
+                      className="text-link"
+                      onClick={() => setRevision((value) => value + 1)}
+                    >
+                      Обновить упоминания
+                    </button>
+                    {mentionsError && <p className="save-error">{mentionsError}</p>}
+                    {!mentions && !mentionsError && (
+                      <p className="empty-small">Ищем упоминания…</p>
+                    )}
+                    {mentions && (
+                      <>
+                        <span className="eyebrow section-spaced">
+                          В других заметках · {mentions.incoming.length}
+                        </span>
+                        {renderMentions(mentions.incoming)}
+                        <span className="eyebrow section-spaced">
+                          В этой заметке · {mentions.outgoing.length}
+                        </span>
+                        {renderMentions(mentions.outgoing)}
+                        {!mentions.incoming.length && !mentions.outgoing.length && (
+                          <p className="empty-small">Несвязанных упоминаний нет</p>
+                        )}
+                        {mentions.truncated && (
+                          <p className="empty-small">
+                            Показан ограниченный список упоминаний: до 500 каждого
+                            направления и до 15 секунд поиска.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
                 {id === "properties" && (
                   <>
                     {Object.entries(currentIndex?.properties || {}).map(
                       ([key, value]) => (
                         <div className="property-row" key={key}>
-                          <label>{key}</label>
-                          <input
-                            aria-label={"Свойство " + key}
-                            key={currentPath + key + JSON.stringify(value)}
-                            defaultValue={
-                              typeof value === "object"
-                                ? yamlStringify(value, {
-                                    flowCollectionPadding: false,
-                                  }).trim()
-                                : String(value)
+                          <label title={key}>{key}</label>
+                          <select
+                            aria-label={"Тип свойства " + key}
+                            value={propertySchema[key] || propertyType(value)}
+                            onChange={(e) =>
+                              setPropertyType(key, e.target.value as PropertyType)
                             }
-                            onBlur={(e) => setProperty(key, e.target.value)}
+                          >
+                            {Object.entries(propertyTypes).map(([type, label]) => (
+                              <option key={type} value={type}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                          <PropertyField
+                            name={key}
+                            value={value}
+                            type={propertySchema[key]}
+                            key={
+                              currentPath +
+                              key +
+                              JSON.stringify(value) +
+                              propertySchema[key]
+                            }
+                            onChange={(value, type) => setProperty(key, value, type)}
                           />
+                          <button
+                            className="icon-button"
+                            aria-label={"Удалить свойство " + key}
+                            onClick={() => setProperty(key, undefined)}
+                          >
+                            <X size={12} />
+                          </button>
                         </div>
                       ),
                     )}
+                    <button className="text-link" onClick={onAllProperties}>
+                      Все свойства хранилища
+                    </button>
                     {currentIndex && (
                       <button
                         className="text-link"

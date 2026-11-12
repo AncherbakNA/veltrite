@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -14,17 +15,24 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { EditorContext, PluginPermission } from "../shared/extensions";
+import { folderFile } from "../shared/links";
 import { normalizeSession, type WorkspaceSession } from "../shared/panes";
 import type { Preferences, SyncStatus } from "../shared/types";
 import { Catalog } from "./catalog";
+import { composeNotes } from "./composer";
 import { ConfigStore } from "./config";
 import { newRecoveryKey, parseRecoveryKey } from "./crypto";
+import { standaloneHtml } from "./export-html";
 import { exportSite, type StaticPage } from "./export-site";
 import { beginDeviceLogin, finishDeviceLogin, GitHub } from "./github";
 import { importFolder } from "./importer";
+import { linkMention, unlinkedMentions } from "./mentions";
+import { updateProperties } from "./metadata";
 import { safePath } from "./paths";
+import { PluginActions } from "./plugin-actions";
 import { pluginPreload, PluginRuntime } from "./plugin-runtime";
 import { Plugins } from "./plugins";
+import { StyleStore } from "./styles";
 import { synchronize, type SyncCheckpoint } from "./sync";
 import type { UpdateController } from "./update-controller";
 import { createUpdates } from "./updates";
@@ -77,6 +85,7 @@ let changeTimer: NodeJS.Timeout | null = null;
 let syncTimer: NodeJS.Timeout | null = null;
 const serial = new Serial();
 let store: ConfigStore, plugins: Plugins, catalog: Catalog;
+let mentionsController: AbortController | null = null;
 let syncBusy = false;
 let syncError: string | null = null;
 let login: Awaited<ReturnType<typeof beginDeviceLogin>> | null = null;
@@ -119,9 +128,12 @@ async function status(): Promise<SyncStatus> {
     deviceFlowAvailable: !!CLIENT_ID,
   };
 }
-function notify() {
-  pluginRuntime?.emit("vault:changed", null);
-  if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("vault:changed");
+function notify(reason: "files" | "settings" = "files") {
+  if (reason === "files") {
+    pluginRuntime?.emit("vault:changed", null);
+    pluginRuntime?.emit("metadata:changed", null);
+  }
+  if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("vault:changed", reason);
 }
 async function openVault(root: string) {
   editorContext = { path: null, content: "", selection: "", paneId: "main" };
@@ -145,8 +157,9 @@ async function openVault(root: string) {
         .some((p) => p.startsWith("."))
     )
       return;
+    next.invalidate(String(name).split(path.sep).join("/"));
     if (changeTimer) clearTimeout(changeTimer);
-    changeTimer = setTimeout(notify, 180);
+    changeTimer = setTimeout(() => notify("files"), 180);
   });
   watcher.on("error", () => notify());
   configureTimer();
@@ -220,6 +233,7 @@ const attachmentTypes = new Set([
   ".mov",
   ".flac",
 ]);
+const styleStore = () => new StyleStore(path.join(app.getPath("userData"), "styles"));
 const methods: Record<string, (...args: any[]) => any> = {
   state: async () => ({
     session: vault ? await store.readLocal("session-" + secretId(), null) : null,
@@ -262,8 +276,15 @@ const methods: Record<string, (...args: any[]) => any> = {
     });
     if (destination.canceled) return null;
     return serial.run(async () => {
-      const result = await importFolder(source.filePaths[0], destination.filePaths[0]);
+      const result = await importFolder(
+        source.filePaths[0],
+        destination.filePaths[0],
+        styleStore(),
+      );
       result.vault = await openVault(destination.filePaths[0]);
+      if (result.session) await store.writeLocal("session-" + secretId(), result.session);
+      if (result.workspaces?.length)
+        await store.writeLocal("workspaces-" + secretId(), result.workspaces);
       return result;
     });
   },
@@ -278,6 +299,21 @@ const methods: Record<string, (...args: any[]) => any> = {
   create: (rel: string, text = "") =>
     serial.run(async () => {
       const result = await needVault().create(rel, text);
+      notify();
+      return result;
+    }),
+  updateProperties: (
+    paths: string[],
+    change: import("../shared/frontmatter-edit").PropertyChange,
+  ) =>
+    serial.run(async () => {
+      const result = await updateProperties(needVault(), paths, change);
+      notify();
+      return result;
+    }),
+  compose: (request: import("../shared/composer").ComposeRequest) =>
+    serial.run(async () => {
+      const result = await composeNotes(needVault(), request);
       notify();
       return result;
     }),
@@ -316,6 +352,20 @@ const methods: Record<string, (...args: any[]) => any> = {
     }),
   search: (query: string) => needVault().search(query),
   index: () => needVault().index(),
+  mentions: (path: string) => {
+    mentionsController?.abort();
+    const controller = new AbortController();
+    mentionsController = controller;
+    return unlinkedMentions(needVault(), path, controller.signal).finally(() => {
+      if (mentionsController === controller) mentionsController = null;
+    });
+  },
+  linkMention: (mention: import("../shared/mentions").UnlinkedMention) =>
+    serial.run(async () => {
+      const result = await linkMention(needVault(), mention);
+      notify();
+      return result;
+    }),
   importAttachments: async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Добавить вложения",
@@ -343,12 +393,20 @@ const methods: Record<string, (...args: any[]) => any> = {
         const filename = path.basename(source),
           ext = path.extname(filename),
           stem = filename.slice(0, filename.length - ext.length);
-        let rel = current.preferences.attachmentFolder + "/" + filename,
+        let rel = folderFile(
+            current.preferences.attachmentFolder,
+            filename,
+            editorContext.path || "",
+          ),
           i = 2;
         while (
           (await current.list()).some((f) => f.path.toLowerCase() === rel.toLowerCase())
         )
-          rel = current.preferences.attachmentFolder + "/" + stem + " " + i++ + ext;
+          rel = folderFile(
+            current.preferences.attachmentFolder,
+            stem + " " + i++ + ext,
+            editorContext.path || "",
+          );
         await atomicWrite(await safePath(current.root, rel), await fs.readFile(source));
         added.push(rel);
       }
@@ -364,11 +422,11 @@ const methods: Record<string, (...args: any[]) => any> = {
         bytes.some((v) => !Number.isInteger(v) || v < 0 || v > 255)
       )
         throw Error("Некорректная аудиозапись");
-      const rel =
-        needVault().preferences.attachmentFolder +
-        "/Запись " +
-        new Date().toISOString().replace(/[:.]/g, "-") +
-        ".webm";
+      const rel = folderFile(
+        needVault().preferences.attachmentFolder,
+        "Запись " + new Date().toISOString().replace(/[:.]/g, "-") + ".webm",
+        editorContext.path || "",
+      );
       await atomicWrite(await safePath(needVault().root, rel), Buffer.from(bytes));
       notify();
       return rel;
@@ -379,7 +437,7 @@ const methods: Record<string, (...args: any[]) => any> = {
         throw Error("Подключите GitHub и подтвердите сохранение ключа восстановления");
       const next = await needVault().setPreferences(patch);
       configureTimer();
-      notify();
+      notify("settings");
       return next;
     }),
   exportVault: async () => {
@@ -417,7 +475,10 @@ const methods: Record<string, (...args: any[]) => any> = {
       filters: [{ name: "HTML", extensions: ["html"] }],
     });
     if (result.canceled || !result.filePath) return false;
-    await atomicWrite(result.filePath, html);
+    await atomicWrite(
+      result.filePath,
+      await standaloneHtml(needVault(), html, path.join(__dirname, "../dist/assets")),
+    );
     return true;
   },
   printPdf: async () => {
@@ -442,6 +503,77 @@ const methods: Record<string, (...args: any[]) => any> = {
     if (typeof url !== "string" || url.length > 8192 || !/^https?:\/\//i.test(url))
       throw Error("Разрешены только ссылки HTTP и HTTPS");
     await shell.openExternal(url);
+  },
+  remoteImage: async (url: string) => {
+    if (typeof url !== "string" || url.length > 8192 || !/^https?:\/\//i.test(url))
+      throw Error("Некорректный адрес изображения");
+    const parsed = new URL(url);
+    if (parsed.username || parsed.password)
+      throw Error("Адрес изображения не должен содержать пароль");
+    const controller = new AbortController(),
+      timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await net.fetch(url, {
+        credentials: "omit",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const mime = (response.headers.get("content-type") || "")
+        .split(";")[0]
+        .toLowerCase();
+      if (
+        !response.ok ||
+        ![
+          "image/png",
+          "image/jpeg",
+          "image/gif",
+          "image/webp",
+          "image/avif",
+          "image/bmp",
+          "image/svg+xml",
+        ].includes(mime) ||
+        !response.body
+      )
+        throw Error("Сервер не вернул изображение");
+      const reader = response.body.getReader(),
+        parts: Uint8Array[] = [];
+      let length = 0;
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        length += chunk.value.length;
+        if (length > 12 * 1024 * 1024) {
+          controller.abort();
+          throw Error("Изображение больше 12 МиБ");
+        }
+        parts.push(chunk.value);
+      }
+      return "data:" + mime + ";base64," + Buffer.concat(parts).toString("base64");
+    } catch (error: any) {
+      if (controller.signal.aborted)
+        throw Error("Загрузка изображения прервана: превышен размер или время ожидания");
+      throw Error(
+        error.message === "Сервер не вернул изображение"
+          ? error.message
+          : "Не удалось загрузить изображение",
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+  copyText: (text: string) => {
+    if (typeof text !== "string" || text.length > 1024 * 1024)
+      throw Error("Слишком большой текст для буфера обмена");
+    clipboard.writeText(text);
+  },
+  readAttachment: async (rel: string) => {
+    if (!attachmentTypes.has(path.extname(rel).toLowerCase()))
+      throw Error("Неподдерживаемый тип вложения");
+    const file = await safePath(needVault().root, rel),
+      stat = await fs.stat(file);
+    if (!stat.isFile() || stat.size > 64 * 1024 * 1024)
+      throw Error("Предпросмотр доступен для вложений до 64 МиБ");
+    return new Uint8Array(await fs.readFile(file));
   },
   openAttachment: async (rel: string) => {
     if (!attachmentTypes.has(path.extname(rel).toLowerCase()))
@@ -614,6 +746,25 @@ const methods: Record<string, (...args: any[]) => any> = {
       mainWindow.webContents.send("plugins:changed");
     }
   },
+  styles: () => styleStore().list(),
+  installStyle: async (kind: "theme" | "snippet") => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: kind === "theme" ? "Установить CSS-тему" : "Добавить CSS-сниппет",
+      properties: ["openFile"],
+      filters: [{ name: "CSS", extensions: ["css"] }],
+    });
+    if (result.canceled) return null;
+    const file = result.filePaths[0];
+    if ((await fs.stat(file)).size > 1024 * 1024)
+      throw Error("CSS должен быть не больше 1 МиБ");
+    return styleStore().install(
+      path.basename(file),
+      await fs.readFile(file, "utf8"),
+      kind,
+    );
+  },
+  saveStyle: (id: string, css: string) => styleStore().save(id, css),
+  removeStyle: (id: string) => styleStore().remove(id),
   themes: () => catalog.themes(),
   installTheme: async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -633,6 +784,7 @@ const methods: Record<string, (...args: any[]) => any> = {
         ? {
             ...plugin,
             registeredCommands: pluginRuntime?.registeredCommands(plugin.id) || [],
+            ui: pluginRuntime?.ui(plugin.id),
           }
         : plugin,
     ),
@@ -679,6 +831,8 @@ const methods: Record<string, (...args: any[]) => any> = {
       context.paneId.length > 80
     )
       throw Error("Некорректный контекст редактора");
+    const workspaceChanged =
+      editorContext.path !== context.path || editorContext.paneId !== context.paneId;
     editorContext = {
       path: context.path,
       content: context.content,
@@ -686,6 +840,11 @@ const methods: Record<string, (...args: any[]) => any> = {
       paneId: context.paneId,
     };
     pluginRuntime?.emit("editor:changed", editorContext);
+    if (workspaceChanged)
+      pluginRuntime?.emit("workspace:changed", {
+        path: editorContext.path,
+        paneId: editorContext.paneId,
+      });
   },
   workspaceSave: async (name: string, data: WorkspaceSession) => {
     if (
@@ -715,6 +874,36 @@ const methods: Record<string, (...args: any[]) => any> = {
     );
     await store.writeLocal("session-" + secretId(), normalizeSession(data, allowed));
   },
+  workspaceRename: (from: string, to: string) =>
+    serial.run(async () => {
+      if (
+        typeof from !== "string" ||
+        typeof to !== "string" ||
+        !to.trim() ||
+        to.length > 100
+      )
+        throw Error("Некорректное название набора вкладок");
+      const key = "workspaces-" + secretId(),
+        all = await store.readLocal<any[]>(key, []);
+      if (!all.some((entry) => entry.name === from))
+        throw Error("Набор вкладок не найден");
+      if (all.some((entry) => entry.name !== from && entry.name === to.trim()))
+        throw Error("Такое название уже используется");
+      await store.writeLocal(
+        key,
+        all.map((entry) => (entry.name === from ? { ...entry, name: to.trim() } : entry)),
+      );
+    }),
+  workspaceDelete: (name: string) =>
+    serial.run(async () => {
+      if (typeof name !== "string") throw Error("Некорректное название набора вкладок");
+      const key = "workspaces-" + secretId(),
+        all = await store.readLocal<any[]>(key, []);
+      await store.writeLocal(
+        key,
+        all.filter((entry) => entry.name !== name),
+      );
+    }),
   workspaces: () => store.readLocal("workspaces-" + secretId(), []),
 };
 function setupIpc() {
@@ -770,6 +959,10 @@ async function createWindow() {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send("updates:state", state);
     },
   });
+  const pluginActions = new PluginActions(mainWindow);
+  const actionReply = (event: Electron.IpcMainEvent, id: unknown, error: unknown) =>
+    pluginActions.reply(event, id, error);
+  ipcMain.on("plugins:action-result", actionReply);
   pluginRuntime = new PluginRuntime(
     plugins,
     {
@@ -777,7 +970,7 @@ async function createWindow() {
       serial,
       changed: notify,
       context: () => editorContext,
-      action: (action) => mainWindow.webContents.send("plugins:action", action),
+      action: (action) => pluginActions.send(action),
       pluginsChanged: () => {
         if (!mainWindow.isDestroyed()) mainWindow.webContents.send("plugins:changed");
       },
@@ -785,6 +978,8 @@ async function createWindow() {
     pluginPreload(__dirname),
   );
   mainWindow.once("closed", () => {
+    ipcMain.removeListener("plugins:action-result", actionReply);
+    pluginActions.close();
     void pluginRuntime?.close();
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -879,7 +1074,7 @@ app
                 { type: "separator" as const },
                 {
                   label: "Настройки…",
-                  accelerator: "CmdOrCtrl+,",
+
                   click: () => emit("settings"),
                 },
                 { type: "separator" as const },
@@ -894,7 +1089,7 @@ app
         submenu: [
           {
             label: "Новая заметка",
-            accelerator: "CmdOrCtrl+N",
+
             click: () => emit("new-note"),
           },
           { label: "Новый холст", click: () => emit("new-canvas") },
@@ -904,7 +1099,7 @@ app
           { label: "Экспорт PDF…", click: () => emit("pdf") },
           {
             label: "Синхронизировать",
-            accelerator: "CmdOrCtrl+Shift+S",
+
             click: () => emit("sync"),
           },
         ],
@@ -926,12 +1121,12 @@ app
         submenu: [
           {
             label: "Палитра команд",
-            accelerator: "CmdOrCtrl+P",
+
             click: () => emit("commands"),
           },
           {
             label: "Быстрый переход",
-            accelerator: "CmdOrCtrl+O",
+
             click: () => emit("quick-open"),
           },
           { label: "Граф", click: () => emit("graph") },

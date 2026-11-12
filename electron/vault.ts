@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { mapBookmarks } from "../shared/bookmarks";
+import { rewriteCanvasReferences } from "../shared/canvas-references";
 import { indexNote, validateCanvas } from "../shared/markdown";
 import type { SearchDocument } from "../shared/search";
 import { DEFAULT_ACCENT } from "../shared/themes";
@@ -161,6 +163,7 @@ export class Vault {
                   : "attachment",
           size: stat.size,
           modified: stat.mtimeMs,
+          created: stat.birthtimeMs || stat.ctimeMs,
         });
         if (item.isDirectory()) await walk(full, rel + "/");
         if (result.length > 50000) throw Error("Хранилище содержит более 50 000 файлов");
@@ -271,30 +274,30 @@ export class Vault {
           oldPaths,
           oldIndex,
         );
-      else if (oldFile.kind === "canvas") {
-        try {
-          const canvas = JSON.parse(text);
-          let changed = false;
-          for (const node of canvas.nodes || [])
-            for (const field of ["file", "background"])
-              if (typeof node[field] === "string") {
-                const replacement = movedPath(node[field], rel, to, directory);
-                if (replacement !== node[field]) {
-                  node[field] = replacement;
-                  changed = true;
-                }
-              }
-          if (changed) text = JSON.stringify(canvas, null, 2);
-        } catch {}
-      }
+      else if (oldFile.kind === "canvas")
+        text = rewriteCanvasReferences(
+          text,
+          oldFile.path,
+          newPath,
+          rel,
+          to,
+          directory,
+          oldPaths,
+          oldIndex,
+        );
+
       if (text !== note.content) await this.write(newPath, text, note.revision);
       if (newPath !== oldFile.path) await this.moveHistory(oldFile.path, newPath);
     }
-    const bookmarks = this.preferences.bookmarks.map((p) =>
-      movedPath(p, rel, to, directory),
+    const bookmarkItems = mapBookmarks(this.preferences.bookmarkItems, (item) =>
+      item.type === "file" || item.type === "folder"
+        ? { ...item, path: movedPath(item.path, rel, to, directory) }
+        : item.type === "graph" && item.local
+          ? { ...item, local: movedPath(item.local, rel, to, directory) }
+          : item,
     );
-    if (JSON.stringify(bookmarks) !== JSON.stringify(this.preferences.bookmarks))
-      await this.setPreferences({ bookmarks });
+    if (JSON.stringify(bookmarkItems) !== JSON.stringify(this.preferences.bookmarkItems))
+      await this.setPreferences({ bookmarkItems });
   }
   private async moveHistory(from: string, to: string) {
     const source = await this.meta("history/" + hash(from));
@@ -411,6 +414,21 @@ export class Vault {
     await atomicWrite(await this.meta("preferences.json"), JSON.stringify(next, null, 2));
     this.preferences = next;
     return next;
+  }
+  invalidate(relative: string) {
+    this.noteCache.delete(relative);
+    this.forgetText(relative);
+  }
+  async analysisFiles() {
+    const files = (await this.list()).filter((file) => file.kind === "note");
+    return { files, index: await this.indexFiles(files) };
+  }
+  get analysisWorker() {
+    return this.searchWorker;
+  }
+  async analysisDocument(file: FileEntry): Promise<NoteData> {
+    const content = await this.indexContent(file);
+    return { path: file.path, content, revision: hash(content) };
   }
   async index() {
     return this.indexFiles((await this.list()).filter((file) => file.kind === "note"));

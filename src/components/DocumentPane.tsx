@@ -7,6 +7,7 @@ import { type Command, type DialogData } from "./Dialog";
 import DocumentBoundary from "./DocumentBoundary";
 import DocumentToolbar from "./DocumentToolbar";
 import Markdown from "./Markdown";
+const MediaView = lazy(() => import("./MediaView"));
 const Editor = lazy(() => import("./Editor"));
 const Canvas = lazy(() => import("./Canvas"));
 const Bases = lazy(() => import("./Bases"));
@@ -15,7 +16,7 @@ interface Props {
   pane: DocumentLeaf;
   workspace: Pick<
     ReturnType<typeof useVault>,
-    "layout" | "edit" | "discard" | "setPaneMode" | "splitPane" | "closePane"
+    "layout" | "edit" | "discard" | "setPaneMode" | "splitPane" | "closePane" | "flush"
   >;
   index: NoteIndex[];
   preferences: Preferences;
@@ -75,6 +76,11 @@ export default function DocumentPane({
           onBack={onBack}
           bookmarked={preferences!.bookmarks.includes(current.path)}
           onBookmark={() => bookmark(current.path)}
+          onFormat={() =>
+            setPalette({
+              commands: commands.filter((command) => command.id.startsWith("editor-")),
+            })
+          }
           onActions={() =>
             setPalette({
               commands: commands.filter((command) =>
@@ -136,8 +142,11 @@ export default function DocumentPane({
             </button>
           </div>
         )}
-        {current.path.toLowerCase().endsWith(".canvas") && mode !== "source" ? (
+        {!/\.(md|canvas|base)$/i.test(current.path) ? (
+          <MediaView key={current.path + current.revision} path={current.path} />
+        ) : current.path.toLowerCase().endsWith(".canvas") && mode !== "source" ? (
           <Canvas
+            path={current.path}
             key={current.path}
             content={current.content}
             onChange={(text) => workspace.edit(current.path, text)}
@@ -170,6 +179,10 @@ export default function DocumentPane({
           />
         ) : current.path.toLowerCase().endsWith(".base") && mode !== "source" ? (
           <Bases
+            path={current.path}
+            types={preferences.propertyTypes}
+            onLink={(target, from) => openLink(target, from, pane.id)}
+            beforePropertyChange={workspace.flush}
             content={current.content}
             index={index}
             files={vault.files}
@@ -187,6 +200,7 @@ export default function DocumentPane({
             {mode !== "read" && (
               <div className="writing-pane">
                 <Editor
+                  vaultId={vault.id}
                   key={current.path}
                   content={current.content}
                   path={current.path}
@@ -206,6 +220,19 @@ export default function DocumentPane({
             {(mode === "read" || mode === "split") && (
               <div className="reading-pane">
                 <Markdown
+                  onTaskChange={(offset, checked) => {
+                    if (
+                      /[ xX]/.test(current.content[offset] || "") &&
+                      current.content[offset - 1] === "[" &&
+                      current.content[offset + 1] === "]"
+                    )
+                      workspace.edit(
+                        current.path,
+                        current.content.slice(0, offset) +
+                          (checked ? "x" : " ") +
+                          current.content.slice(offset + 1),
+                      );
+                  }}
                   content={current.content}
                   path={current.path}
                   index={index}

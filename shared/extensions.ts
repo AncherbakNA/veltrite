@@ -2,10 +2,13 @@ import type { PluginInfo } from "./types";
 export const permissionLabels = {
   "vault.read": "Читать файлы хранилища",
   "vault.write": "Создавать и изменять файлы хранилища",
+  "vault.manage": "Перемещать файлы и отправлять их в корзину",
   "editor.read": "Читать открытый черновик и выделение",
   "editor.write": "Вставлять текст в редактор",
   storage: "Хранить настройки расширения",
   notice: "Показывать уведомления",
+  ui: "Показывать собственные окна, кнопки и строку состояния",
+  workspace: "Открывать заметки, поиск и граф",
 } as const;
 export type PluginPermission = keyof typeof permissionLabels;
 export interface EditorContext {
@@ -14,9 +17,22 @@ export interface EditorContext {
   selection: string;
   paneId: string;
 }
-export interface PluginAction {
-  type: "insert" | "append" | "notice";
-  text: string;
+export type PluginAction =
+  | { type: "insert" | "append" | "notice"; text: string }
+  | {
+      type: "open";
+      path: string;
+      split?: "row" | "column";
+      mode?: "live" | "source" | "read" | "split";
+    }
+  | { type: "search"; query: string }
+  | { type: "graph" }
+  | { type: "rename"; path: string; to: string }
+  | { type: "trash"; path: string };
+export interface PluginUI {
+  ribbon: { id: string; title: string; icon: string; command: string }[];
+  status: { text: string; command?: string } | null;
+  settings: string | null;
 }
 export function validatePlugin(value: unknown): PluginInfo {
   if (!value || typeof value !== "object")

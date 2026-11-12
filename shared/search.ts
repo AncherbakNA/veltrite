@@ -1,3 +1,4 @@
+import { searchRanges, type SearchScope } from "./markdown-ranges";
 import type { NoteIndex, SearchResult } from "./types";
 export interface SearchDocument {
   note: NoteIndex;
@@ -12,6 +13,7 @@ type Matcher = {
 export type SearchExpression =
   | { op: "term"; match: Matcher }
   | { op: "not"; child: SearchExpression }
+  | { op: "scope"; scope: SearchScope; child: SearchExpression }
   | { op: "and" | "or"; left: SearchExpression; right: SearchExpression };
 /** A small query language; expressions are data and never evaluated as JavaScript. */
 export function parseSearch(query: string): SearchExpression | null {
@@ -66,6 +68,15 @@ export function parseSearch(query: string): SearchExpression | null {
     }
     if ([")", "AND", "OR"].includes(token.toUpperCase()))
       throw Error("Ожидалось условие поиска");
+    const scoped = /^(line|block|section|task|task-todo|task-done):(.*)$/i.exec(token);
+    if (scoped) {
+      if (scoped[2]) tokens.splice(cursor, 0, scoped[2]);
+      return {
+        op: "scope",
+        scope: scoped[1].toLowerCase() as SearchScope,
+        child: term(),
+      };
+    }
     let field = "text",
       value = token,
       property: string | undefined;
@@ -189,6 +200,13 @@ function compile(match: Matcher): (document: SearchDocument) => boolean {
 }
 function predicate(expression: SearchExpression): (d: SearchDocument) => boolean {
   if (expression.op === "term") return compile(expression.match);
+  if (expression.op === "scope") {
+    const matches = predicate(expression.child);
+    return (document) =>
+      searchRanges(document.text, expression.scope).some((range) =>
+        matches({ ...document, text: document.text.slice(range.from, range.to) }),
+      );
+  }
   if (expression.op === "not") {
     const child = predicate(expression.child);
     return (d) => !child(d);
@@ -207,8 +225,10 @@ export function searchDocuments(
   const matches = predicate(expression),
     results: SearchResult[] = [];
   const positives: ((d: SearchDocument) => boolean)[] = [];
+  const scopes: Extract<SearchExpression, { op: "scope" }>[] = [];
   function collect(node: SearchExpression) {
-    if (node.op === "term" && ["text", "content"].includes(node.match.field))
+    if (node.op === "scope") scopes.push(node);
+    else if (node.op === "term" && ["text", "content"].includes(node.match.field))
       positives.push(compile({ ...node.match, field: "content" }));
     else if (node.op === "and" || node.op === "or") {
       collect(node.left);
@@ -220,7 +240,22 @@ export function searchDocuments(
     if (!matches(document)) continue;
     const lines = document.text.split("\n");
     let count = 0;
-    if (positives.length)
+    for (const scope of scopes) {
+      const matches = predicate(scope.child);
+      for (const range of searchRanges(document.text, scope.scope)) {
+        const text = document.text.slice(range.from, range.to);
+        if (matches({ ...document, text })) {
+          results.push({
+            path: document.note.path,
+            line: range.line,
+            text: text.replace(/\r?\n/g, " ").slice(0, 250),
+          });
+          if (++count >= 5 || results.length >= 500) break;
+        }
+      }
+      if (count >= 5 || results.length >= 500) break;
+    }
+    if (!count && positives.length)
       for (let i = 0; i < lines.length; i++) {
         if (positives.some((test) => test({ ...document, text: lines[i] }))) {
           results.push({
@@ -242,4 +277,18 @@ export function searchDocuments(
     if (results.length >= 500) break;
   }
   return results;
+}
+
+/** Metadata predicates for the graph worker; regexes stay inside disposable workers. */
+export function metadataPredicate(
+  query: string,
+): (note: import("./types").NoteIndex) => boolean {
+  const expression = parseSearch(query);
+  if (!expression) return () => true;
+  const test = predicate(expression);
+  return (note) =>
+    test({
+      note,
+      text: note.title + " " + note.aliases.join(" ") + " " + note.tags.join(" "),
+    });
 }

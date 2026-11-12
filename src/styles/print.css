@@ -24,6 +24,24 @@
     overflow: visible !important;
     background: white !important;
   }
+  .document-leaf:not(.focused-pane),
+  .pane-divider,
+  .reading-find,
+  .heading-fold,
+  .graph-view {
+    display: none !important;
+  }
+  .pane-split,
+  .pane-branch,
+  .document-leaf {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    flex: none !important;
+  }
+  .markdown [hidden] {
+    display: block !important;
+  }
   .writing-pane {
     display: none !important;
   }
@@ -33,7 +51,25 @@
   .reading-pane .markdown {
     max-width: none !important;
     color: #222 !important;
+    --text: #222;
+    --muted: #555;
+    --faint: #666;
+    --surface: #f2f0eb;
+    --sidebar: #fff;
+    --bg: #fff;
+    --border: #ccc;
+    --accent-ink: #806342;
     font-size: 12pt !important;
+  }
+  .pdf-toolbar,
+  .pdf-search,
+  .pdf-loading,
+  .pdf-password {
+    display: none !important;
+  }
+  .pdf-page-scroll {
+    max-height: none !important;
+    overflow: visible !important;
   }
   .markdown pre,
   .markdown blockquote {

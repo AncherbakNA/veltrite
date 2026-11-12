@@ -7,6 +7,7 @@ import {
   PenLine,
   Rows2,
   Star,
+  Type,
   X,
 } from "lucide-react";
 import type { EditorMode } from "../commands";
@@ -21,6 +22,7 @@ interface DocumentToolbarProps {
   bookmarked: boolean;
   onBookmark: () => void;
   onActions: () => void;
+  onFormat: () => void;
   onSplit: (direction: "row" | "column") => void;
   onClosePane?: () => void;
 }
@@ -33,10 +35,11 @@ export default function DocumentToolbar({
   bookmarked,
   onBookmark,
   onActions,
+  onFormat,
   onSplit,
   onClosePane,
 }: DocumentToolbarProps) {
-  const visual = /\.(canvas|base)$/i.test(path);
+  const visual = !/\.md$/i.test(path);
   const reading = mode === "read";
   return (
     <div className="document-toolbar">
@@ -63,6 +66,16 @@ export default function DocumentToolbar({
         {visual && mode === "source" && (
           <button className="reading-toggle" onClick={() => setMode("live")}>
             {path.endsWith(".canvas") ? "Холст" : "Представление"}
+          </button>
+        )}
+        {!visual && !reading && (
+          <button
+            className="icon-button"
+            aria-label="Форматирование текста"
+            title="Форматирование текста"
+            onClick={onFormat}
+          >
+            <Type size={16} />
           </button>
         )}
         {!visual && (

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GraphData, GraphNode } from "../../shared/graph";
+import type { GraphOptions } from "../../shared/graph-options";
 import { usePaletteVersion } from "../usePaletteVersion";
 export default function GraphCanvas({
   graph,
   active,
   onOpen,
+  options,
 }: {
+  options: GraphOptions;
   graph: GraphData;
   active: string | null;
   onOpen: (path: string) => void;
@@ -76,7 +79,7 @@ export default function GraphCanvas({
     const style = getComputedStyle(document.documentElement),
       byPath = new Map(graph.nodes.map((node) => [node.path, node]));
     context.strokeStyle = style.getPropertyValue("--border-strong");
-    context.lineWidth = 0.5 / Math.sqrt(transform.scale);
+    context.lineWidth = (0.5 * options.linkScale) / Math.sqrt(transform.scale);
     context.globalAlpha = 0.45;
     context.beginPath();
     for (const edge of graph.edges) {
@@ -85,25 +88,82 @@ export default function GraphCanvas({
       if (a && b) {
         context.moveTo(a.x, a.y);
         context.lineTo(b.x, b.y);
+        if (options.arrows) {
+          const length = Math.hypot(b.x - a.x, b.y - a.y),
+            arrow = 4 / Math.sqrt(transform.scale),
+            radius = (3 * options.nodeScale) / Math.sqrt(transform.scale);
+          if (length > arrow * 3) {
+            const dx = (b.x - a.x) / length,
+              dy = (b.y - a.y) / length,
+              tipX = b.x - dx * radius,
+              tipY = b.y - dy * radius;
+            context.moveTo(
+              tipX - dx * arrow - dy * arrow * 0.6,
+              tipY - dy * arrow + dx * arrow * 0.6,
+            );
+            context.lineTo(tipX, tipY);
+            context.lineTo(
+              tipX - dx * arrow + dy * arrow * 0.6,
+              tipY - dy * arrow - dx * arrow * 0.6,
+            );
+          }
+        }
       }
     }
     context.stroke();
     context.globalAlpha = 1;
     for (const node of graph.nodes) {
-      context.fillStyle = style.getPropertyValue(
-        node.path === active || node === hover ? "--accent" : "--muted",
-      );
+      context.fillStyle =
+        node.color ||
+        style.getPropertyValue(
+          node.path === active || node === hover ? "--accent" : "--muted",
+        );
       context.beginPath();
       context.arc(
         node.x,
         node.y,
-        (node === hover ? 5 : 2.2) / Math.sqrt(transform.scale),
+        ((node === hover ? 5 : 2.2) * options.nodeScale) / Math.sqrt(transform.scale),
         0,
         Math.PI * 2,
       );
       context.fill();
     }
-  }, [graph, active, hover, size, transform, unit, offset.x, offset.y, paletteVersion]);
+    if (options.labels) {
+      const occupied = new Set<string>();
+      let labels = 0;
+      context.fillStyle = style.getPropertyValue("--text");
+      context.font = `${10 / transform.scale}px system-ui`;
+      context.textBaseline = "middle";
+      const nodes = hover
+        ? [hover, ...graph.nodes.filter((node) => node !== hover)]
+        : graph.nodes;
+      for (const node of nodes) {
+        const x = offset.x + (transform.x + node.x * transform.scale) * unit,
+          y = offset.y + (transform.y + node.y * transform.scale) * unit;
+        if (x < 0 || y < 0 || x > size.width - 30 || y > size.height) continue;
+        const cell = `${Math.floor(x / 85)},${Math.floor(y / 15)}`;
+        if (occupied.has(cell) || labels >= 1500) continue;
+        occupied.add(cell);
+        labels++;
+        context.fillText(
+          node.title.slice(0, 60),
+          node.x + (5 * options.nodeScale) / Math.sqrt(transform.scale),
+          node.y,
+        );
+      }
+    }
+  }, [
+    graph,
+    active,
+    hover,
+    size,
+    transform,
+    unit,
+    offset.x,
+    offset.y,
+    paletteVersion,
+    options,
+  ]);
   return (
     <div className="graph-canvas-wrap">
       <canvas

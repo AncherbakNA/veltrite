@@ -6,19 +6,24 @@ import {
   forceSimulation,
 } from "d3-force";
 import type { GraphData, GraphNode } from "./graph";
-export function layoutGraph(graph: GraphData, maxMilliseconds = 1200): GraphData {
+import { defaultGraphOptions, type GraphOptions } from "./graph-options";
+export function layoutGraph(
+  graph: GraphData,
+  maxMilliseconds = 1200,
+  options: GraphOptions = defaultGraphOptions,
+): GraphData {
   if (!graph.nodes.length) return graph;
   const links = graph.edges.map((edge) => ({ source: edge.from, target: edge.to }));
   const simulation = forceSimulation<GraphNode>(graph.nodes)
     .stop()
-    .force("charge", forceManyBody<GraphNode>().strength(-80).theta(1.1))
+    .force("charge", forceManyBody<GraphNode>().strength(-options.charge).theta(1.1))
     .force(
       "links",
       forceLink<GraphNode, (typeof links)[number]>(links)
         .id((node) => node.path)
-        .distance(65),
+        .distance(options.distance),
     )
-    .force("collision", forceCollide<GraphNode>().radius(12))
+    .force("collision", forceCollide<GraphNode>().radius(12 * options.nodeScale))
     .force("center", forceCenter(0, 0));
   const started = performance.now();
   for (let i = 0; i < 90; i++) {

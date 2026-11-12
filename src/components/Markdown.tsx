@@ -1,18 +1,35 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { frontmatter, resolveLink } from "../../shared/markdown";
-import { noteFragment } from "../../shared/markdown-blocks";
+import { maskMarkdownComments } from "../../shared/markdown-comments";
 import type { NoteIndex } from "../../shared/types";
 import { scrollWithinMarkdown } from "../navigation";
 import { api } from "../useVault";
 import { VaultFilesContext } from "../VaultContext";
+import Embedded from "./Embedded";
+import { EmbeddingRoot } from "./EmbeddingContext";
+import InlineBase from "./InlineBase";
 import { markdownAnchors } from "./markdownAnchors";
+import {
+  MarkdownBlockquote,
+  MarkdownCheckbox,
+  markdownHeadings,
+  MarkdownListItem,
+  MarkdownTaskChange,
+} from "./MarkdownElements";
+import {
+  markdownPresentation,
+  markdownTaskPositions,
+  readingHighlights,
+} from "./markdownPresentation";
+import { MarkdownRevision } from "./MarkdownRevision";
 import NoteLink from "./NoteLink";
-export const assetUrl = (path: string) =>
-  "veltrite-asset://vault/" + path.split("/").map(encodeURIComponent).join("/");
+import SafeImage from "./SafeImage";
+import { useReadingFind } from "./useReadingFind";
+export { assetUrl } from "../assets";
 function wikiLinks() {
   return (tree: any) => {
     function walk(node: any) {
@@ -40,7 +57,7 @@ function wikiLinks() {
               ? {
                   type: "image",
                   url: "#embed:" + encodeURIComponent(target),
-                  alt: label,
+                  alt: match[3] || "",
                 }
               : {
                   type: "link",
@@ -85,63 +102,12 @@ function Diagram({ code }: { code: string }) {
     };
   }, [code]);
   return error || !svg ? (
-    <pre>
+    <pre data-render-pending={(!error && !svg) || undefined}>
       <code>{code}</code>
       {error && <small>{error}</small>}
     </pre>
   ) : (
     <span className="diagram" dangerouslySetInnerHTML={{ __html: svg }} />
-  );
-}
-function Embedded({
-  target,
-  from,
-  index,
-  onLink,
-  depth,
-}: {
-  target: string;
-  from: string;
-  index: NoteIndex[];
-  onLink: (link: string) => void;
-  depth: number;
-}) {
-  const contextPaths = useContext(VaultFilesContext),
-    paths = contextPaths.length ? contextPaths : index.map((n) => n.path),
-    resolved = resolveLink(target, from, paths, index),
-    [content, setContent] = useState("");
-  useEffect(() => {
-    if (resolved && depth < 2)
-      api()
-        .read(resolved)
-        .then((n) => setContent(n.content))
-        .catch(() => {});
-  }, [resolved, depth]);
-  if (resolved && /\.md$/i.test(resolved))
-    return (
-      <span className="embed-note">
-        <button onClick={() => onLink(target)}>{resolved.replace(/\.md$/i, "")}</button>
-        {depth < 2 && (
-          <Markdown
-            content={noteFragment(content, target) ?? "Фрагмент не найден"}
-            path={resolved}
-            index={index}
-            onLink={onLink}
-            depth={depth + 1}
-          />
-        )}
-      </span>
-    );
-  const relative = resolved || target.split("#")[0];
-  if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(relative))
-    return <img src={assetUrl(relative)} alt={relative} loading="lazy" />;
-  if (/\.(mp3|wav|ogg|webm|m4a|flac)$/i.test(relative))
-    return <audio controls src={assetUrl(relative)} />;
-  if (/\.(mp4|mov)$/i.test(relative)) return <video controls src={assetUrl(relative)} />;
-  return (
-    <button className="inline-link" onClick={() => onLink(target)}>
-      {relative}
-    </button>
   );
 }
 export default function Markdown({
@@ -150,101 +116,169 @@ export default function Markdown({
   index,
   onLink,
   depth = 0,
+  onTaskChange,
 }: {
   content: string;
   path: string;
   index: NoteIndex[];
   onLink: (target: string) => void;
   depth?: number;
+  onTaskChange?: (offset: number, checked: boolean) => void;
 }) {
   const paths = useContext(VaultFilesContext);
   const { body } = frontmatter(content);
-  const source = body.replace(
-    /^(>\s*)\[!([\w-]+)\][+-]?\s*(.*)$/gm,
-    (_all, prefix, kind, title) =>
-      `${prefix}**${title || ({ tip: "Совет", note: "Заметка", warning: "Внимание", info: "Информация", example: "Пример", quote: "Цитата", danger: "Осторожно", success: "Готово" } as any)[kind] || kind}**`,
+  const source = useMemo(() => maskMarkdownComments(body), [body]);
+  const host = useRef<HTMLDivElement>(null);
+  const find = useReadingFind(host, depth === 0);
+  const highlight = useMemo(() => readingHighlights(find.query), [find.query]);
+  const revision = useMemo(() => ({ content, query: find.query }), [content, find.query]);
+  const renderData = useRef({ path, index, paths, onLink, depth });
+  renderData.current = { path, index, paths, onLink, depth };
+  const components = useMemo<import("react-markdown").Components>(
+    () => ({
+      ...markdownHeadings,
+      blockquote: MarkdownBlockquote,
+      li: MarkdownListItem,
+      input: MarkdownCheckbox,
+      p: ({ node, children, ...props }) =>
+        node?.children?.some(
+          (child: any) =>
+            child.tagName === "img" && child.properties?.src?.startsWith("#embed:"),
+        ) ? (
+          <div className="markdown-paragraph" {...props}>
+            {children}
+          </div>
+        ) : (
+          <p {...props}>{children}</p>
+        ),
+      a: ({ href, children }) => {
+        const { path, index, onLink } = renderData.current;
+        if (href?.startsWith("#vlt:")) {
+          const target = decodeURIComponent(href.slice(5));
+          return (
+            <NoteLink target={target} from={path} index={index} onOpen={onLink}>
+              {children}
+            </NoteLink>
+          );
+        }
+        if (href && !/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("#"))
+          return (
+            <NoteLink target={href} from={path} index={index} onOpen={onLink}>
+              {children}
+            </NoteLink>
+          );
+        return (
+          <a
+            href={href}
+            onClick={(event) => {
+              event.preventDefault();
+              if (href?.startsWith("#"))
+                scrollWithinMarkdown(event.currentTarget, href.slice(1));
+              else if (/^https?:/.test(href || "")) api().openExternal(href!);
+              else if (href) onLink(href);
+            }}
+          >
+            {children}
+          </a>
+        );
+      },
+      img: ({ src, alt }) => {
+        const { path, index, paths, onLink, depth } = renderData.current;
+        return src?.startsWith("#embed:") ? (
+          <Embedded
+            target={decodeURIComponent(src.slice(7))}
+            from={path}
+            index={index}
+            onLink={onLink}
+            depth={depth}
+            width={
+              /^\d+(?:x\d+)?$/.test(alt || "")
+                ? Math.min(4000, Number(alt!.split("x")[0]))
+                : undefined
+            }
+            height={
+              /^\d+x\d+$/.test(alt || "")
+                ? Math.min(4000, Number(alt!.split("x")[1]))
+                : undefined
+            }
+          />
+        ) : (
+          <SafeImage
+            alt={alt || ""}
+            path={
+              /^https?:/i.test(src || "")
+                ? src!
+                : resolveLink(src || "", path, paths, index) ||
+                  (src || "").replace(/^\.\//, "")
+            }
+          />
+        );
+      },
+      pre: ({ node, children, ...props }) =>
+        node?.children?.some((child: any) =>
+          child.properties?.className?.includes("language-base"),
+        ) ? (
+          <div className="inline-base">{children}</div>
+        ) : (
+          <pre {...props}>{children}</pre>
+        ),
+      code: ({ className, children, ...props }) =>
+        className === "language-base" ? (
+          <InlineBase
+            content={String(children)}
+            path={renderData.current.path}
+            index={renderData.current.index}
+            onLink={renderData.current.onLink}
+          />
+        ) : className === "language-mermaid" ? (
+          <Diagram code={String(children)} />
+        ) : (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        ),
+    }),
+    [],
   );
   return (
-    <div className="markdown" data-markdown-path={path}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, wikiLinks, markdownAnchors]}
-        rehypePlugins={[rehypeKatex]}
-        urlTransform={(url) =>
-          url.startsWith("#vlt:") || url.startsWith("#embed:")
-            ? url
-            : defaultUrlTransform(url)
-        }
-        components={{
-          p: ({ node, children, ...props }) =>
-            node?.children?.some(
-              (child: any) =>
-                child.tagName === "img" && child.properties?.src?.startsWith("#embed:"),
-            ) ? (
-              <div className="markdown-paragraph" {...props}>
-                {children}
-              </div>
-            ) : (
-              <p {...props}>{children}</p>
-            ),
-          a: ({ href, children }) => {
-            if (href?.startsWith("#vlt:")) {
-              const target = decodeURIComponent(href.slice(5));
-              return (
-                <NoteLink target={target} from={path} index={index} onOpen={onLink}>
-                  {children}
-                </NoteLink>
-              );
-            }
-            return (
-              <a
-                href={href}
-                onClick={(event) => {
-                  event.preventDefault();
-                  if (href?.startsWith("#"))
-                    scrollWithinMarkdown(event.currentTarget, href.slice(1));
-                  else if (/^https?:/.test(href || "")) api().openExternal(href!);
-                  else if (href) onLink(href);
-                }}
-              >
-                {children}
-              </a>
-            );
-          },
-          img: ({ src, alt }) =>
-            src?.startsWith("#embed:") ? (
-              <Embedded
-                target={decodeURIComponent(src.slice(7))}
-                from={path}
-                index={index}
-                onLink={onLink}
-                depth={depth}
-              />
-            ) : (
-              <img
-                alt={alt}
-                src={
-                  /^https?:/i.test(src || "")
-                    ? undefined
-                    : assetUrl(
-                        resolveLink(src || "", path, paths, index) ||
-                          (src || "").replace(/^\.\//, ""),
-                      )
-                }
-                loading="lazy"
-              />
-            ),
-          code: ({ className, children, ...props }) =>
-            className === "language-mermaid" ? (
-              <Diagram code={String(children)} />
-            ) : (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            ),
-        }}
-      >
-        {source}
-      </ReactMarkdown>
-    </div>
+    <EmbeddingRoot path={path}>
+      <MarkdownRevision.Provider value={revision}>
+        <MarkdownTaskChange.Provider
+          value={
+            onTaskChange
+              ? (offset, checked) =>
+                  onTaskChange(content.length - body.length + offset, checked)
+              : undefined
+          }
+        >
+          <div
+            ref={host}
+            className="markdown markdown-preview-view markdown-rendered"
+            data-markdown-path={path}
+          >
+            {find.bar}
+            <ReactMarkdown
+              remarkPlugins={[
+                remarkGfm,
+                remarkMath,
+                markdownPresentation,
+                markdownTaskPositions,
+                wikiLinks,
+                markdownAnchors,
+              ]}
+              rehypePlugins={[rehypeKatex, highlight]}
+              urlTransform={(url) =>
+                url.startsWith("#vlt:") || url.startsWith("#embed:")
+                  ? url
+                  : defaultUrlTransform(url)
+              }
+              components={components}
+            >
+              {source}
+            </ReactMarkdown>
+          </div>
+        </MarkdownTaskChange.Provider>
+      </MarkdownRevision.Provider>
+    </EmbeddingRoot>
   );
 }

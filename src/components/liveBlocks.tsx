@@ -9,10 +9,11 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import { renderedBlocks, type RenderedBlock } from "../../shared/markdown-blocks";
 import type { NoteIndex } from "../../shared/types";
-import { VaultFilesContext } from "../VaultContext";
+import { VaultFilesContext, VaultRuntimeContext } from "../VaultContext";
 import Markdown from "./Markdown";
 
 export interface PreviewData {
+  runtime?: import("react").ContextType<typeof VaultRuntimeContext>;
   path: string;
   index: NoteIndex[];
   paths: string[];
@@ -21,7 +22,7 @@ export interface PreviewData {
 export const refreshPreview = StateEffect.define<void>();
 const focusPreview = StateEffect.define<boolean>();
 const roots = new WeakMap<HTMLElement, Root>();
-const labels = { table: "таблицу", math: "формулу", mermaid: "диаграмму" };
+const labels = { table: "таблицу", math: "формулу", mermaid: "диаграмму", base: "базу" };
 
 class BlockWidget extends WidgetType {
   constructor(
@@ -67,12 +68,14 @@ class BlockWidget extends WidgetType {
     roots.set(element, root);
     root.render(
       <VaultFilesContext.Provider value={value.paths}>
-        <Markdown
-          content={this.block.source}
-          path={value.path}
-          index={value.index}
-          onLink={value.onLink}
-        />
+        <VaultRuntimeContext.Provider value={value.runtime || { files: [], types: {} }}>
+          <Markdown
+            content={this.block.source}
+            path={value.path}
+            index={value.index}
+            onLink={value.onLink}
+          />
+        </VaultRuntimeContext.Provider>
       </VaultFilesContext.Provider>,
     );
     return element;

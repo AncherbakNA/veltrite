@@ -7,7 +7,7 @@
       "name": "Содержание в заметке",
       "description": "Вставляет список заголовков открытой заметки.",
       "version": "1.0.0",
-      "revision": "v0.3.0",
+      "revision": "v0.4.0",
       "assets": [
         {
           "file": "manifest.json",
@@ -27,7 +27,7 @@
       "name": "Дата и время",
       "description": "Вставляет текущую дату и время в место курсора.",
       "version": "1.0.0",
-      "revision": "v0.3.0",
+      "revision": "v0.4.0",
       "assets": [
         {
           "file": "manifest.json",
@@ -47,7 +47,7 @@
       "name": "Бумага",
       "description": "Тёплая палитра для длительного чтения.",
       "version": "1.0.0",
-      "revision": "v0.3.0",
+      "revision": "v0.4.0",
       "assets": [
         {
           "file": "theme.json",
@@ -62,7 +62,7 @@
       "name": "Сланец",
       "description": "Холодная серая палитра с синим акцентом.",
       "version": "1.0.0",
-      "revision": "v0.3.0",
+      "revision": "v0.4.0",
       "assets": [
         {
           "file": "theme.json",

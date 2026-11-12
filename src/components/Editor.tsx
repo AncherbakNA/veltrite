@@ -1,15 +1,26 @@
+import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import {
+  foldAll,
+  foldGutter,
+  foldKeymap,
+  HighlightStyle,
+  syntaxHighlighting,
+  unfoldAll,
+} from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { vim } from "@replit/codemirror-vim";
 import { minimalSetup } from "codemirror";
 import { useContext, useEffect, useRef } from "react";
+import { editorAction } from "../../shared/editor-actions";
 import type { NoteIndex, Preferences } from "../../shared/types";
-import { registerEditorInsertion } from "../editorInsertion";
-import { VaultFilesContext } from "../VaultContext";
+import { registerEditorActions, registerEditorInsertion } from "../editorInsertion";
+import { rememberEditor, restoreEditor } from "../editorMemory";
+import { noteCompletion } from "../noteCompletion";
+import { VaultFilesContext, VaultRuntimeContext } from "../VaultContext";
 import { liveBlocks, refreshPreview, type PreviewData } from "./liveBlocks";
 import { livePreview } from "./livePreview";
 const colors = HighlightStyle.define([
@@ -67,6 +78,7 @@ export default function Editor({
   onCommand,
   onSelection,
   live = true,
+  vaultId,
 }: {
   content: string;
   path: string;
@@ -78,6 +90,7 @@ export default function Editor({
   onCommand: (onPick?: () => void) => void;
   onSelection: (text: string) => void;
   live?: boolean;
+  vaultId: string;
 }) {
   const host = useRef<HTMLDivElement>(null),
     view = useRef<EditorView | null>(null),
@@ -88,9 +101,10 @@ export default function Editor({
     settings = useRef(new Compartment()),
     preview = useRef(new Compartment()),
     vimConfig = useRef(new Compartment());
-  const paths = useContext(VaultFilesContext);
-  const previewData = useRef<PreviewData>({ path, index, paths, onLink });
-  previewData.current = { path, index, paths, onLink };
+  const paths = useContext(VaultFilesContext),
+    runtime = useContext(VaultRuntimeContext);
+  const previewData = useRef<PreviewData>({ path, index, paths, onLink, runtime });
+  previewData.current = { path, index, paths, onLink, runtime };
   const getPreviewData = () => previewData.current;
   change.current = onChange;
   const liveRef = useRef(live);
@@ -100,92 +114,102 @@ export default function Editor({
   selection.current = onSelection;
   useEffect(() => {
     if (!host.current) return;
-    const editor = new EditorView({
-      parent: host.current,
-      state: EditorState.create({
-        doc: content,
-        extensions: [
-          minimalSetup,
-          keymap.of(searchKeymap),
-          highlightSelectionMatches(),
-          markdown({ base: markdownLanguage }),
-          syntaxHighlighting(colors),
-          EditorView.lineWrapping,
-          preview.current.of(
-            live
-              ? [
-                  livePreview((target) => link.current(target), getPreviewData),
-                  liveBlocks(getPreviewData),
-                ]
-              : [],
-          ),
-          vimConfig.current.of(preferences.vimMode ? vim() : []),
-          settings.current.of(preferences.lineNumbers ? lineNumbers() : []),
-          placeholder("Текст заметки…"),
-          editorTheme,
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              change.current(update.state.doc.toString());
-              let slash = false;
-              for (const transaction of update.transactions)
-                if (transaction.isUserEvent("input.type"))
-                  transaction.changes.iterChanges(
-                    (_from, _to, _newFrom, _newTo, inserted) => {
-                      if (inserted.toString() === "/") slash = true;
-                    },
-                  );
-              const line = update.state.doc.lineAt(update.state.selection.main.head);
-              if (slash && liveRef.current && line.text.trim() === "/") {
-                const position = line.from + line.text.indexOf("/");
-                command.current(() => {
-                  if (
-                    view.current === editor &&
-                    editor.state.sliceDoc(position, position + 1) === "/"
-                  )
-                    editor.dispatch({
-                      changes: { from: position, to: position + 1, insert: "" },
-                    });
-                });
-              }
-            }
-            if (update.selectionSet) {
-              const range = update.state.selection.main;
-              selection.current(update.state.sliceDoc(range.from, range.to));
-            }
-          }),
-          EditorView.domEventHandlers({
-            click: (event, editor) => {
-              if (!(event.metaKey || event.ctrlKey)) return false;
-              const pos = editor.posAtCoords({
-                x: event.clientX,
-                y: event.clientY,
-              });
-              if (pos === null) return false;
-              const line = editor.state.doc.lineAt(pos);
-              for (const match of line.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
-                if (
-                  pos - line.from >= match.index! &&
-                  pos - line.from <= match.index! + match[0].length
-                ) {
-                  link.current(match[1]);
-                  return true;
-                }
-              }
-              return false;
-            },
-            keydown: (event) => {
-              if (event.key === "/" && (event.ctrlKey || event.metaKey)) {
-                command.current();
-                return true;
-              }
-              return false;
-            },
-          }),
-        ],
+    const memoryKey = JSON.stringify([vaultId, path, paneId || "main"]);
+    const saved = restoreEditor(memoryKey, content, [
+      minimalSetup,
+      foldGutter(),
+      keymap.of([...foldKeymap, ...completionKeymap]),
+      autocompletion({
+        override: [(context) => noteCompletion(context, previewData.current)],
       }),
-    });
+      keymap.of(searchKeymap),
+      highlightSelectionMatches(),
+      markdown({ base: markdownLanguage }),
+      syntaxHighlighting(colors),
+      EditorView.lineWrapping,
+      preview.current.of(
+        live
+          ? [
+              livePreview((target) => link.current(target), getPreviewData),
+              liveBlocks(getPreviewData),
+            ]
+          : [],
+      ),
+      vimConfig.current.of(preferences.vimMode ? vim() : []),
+      settings.current.of(preferences.lineNumbers ? lineNumbers() : []),
+      placeholder("Текст заметки…"),
+      editorTheme,
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          change.current(update.state.doc.toString());
+          let slash = false;
+          for (const transaction of update.transactions)
+            if (transaction.isUserEvent("input.type"))
+              transaction.changes.iterChanges(
+                (_from, _to, _newFrom, _newTo, inserted) => {
+                  if (inserted.toString() === "/") slash = true;
+                },
+              );
+          const line = update.state.doc.lineAt(update.state.selection.main.head);
+          if (slash && liveRef.current && line.text.trim() === "/") {
+            const position = line.from + line.text.indexOf("/");
+            command.current(() => {
+              if (
+                view.current === editor &&
+                editor.state.sliceDoc(position, position + 1) === "/"
+              )
+                editor.dispatch({
+                  changes: { from: position, to: position + 1, insert: "" },
+                });
+            });
+          }
+        }
+        if (update.selectionSet) {
+          const range = update.state.selection.main;
+          selection.current(update.state.sliceDoc(range.from, range.to));
+        }
+      }),
+      EditorView.domEventHandlers({
+        click: (event, editor) => {
+          if (!(event.metaKey || event.ctrlKey)) return false;
+          const pos = editor.posAtCoords({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          if (pos === null) return false;
+          const line = editor.state.doc.lineAt(pos);
+          for (const match of line.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
+            if (
+              pos - line.from >= match.index! &&
+              pos - line.from <= match.index! + match[0].length
+            ) {
+              link.current(match[1]);
+              return true;
+            }
+          }
+          return false;
+        },
+        keydown: (event) => {
+          if (event.key === "/" && (event.ctrlKey || event.metaKey)) {
+            command.current();
+            return true;
+          }
+          return false;
+        },
+      }),
+    ]);
+    const editor = new EditorView({ parent: host.current, state: saved.state });
     view.current = editor;
+    const restore = requestAnimationFrame(() => {
+      editor.scrollDOM.scrollTop = saved.scroll;
+      const parent = editor.dom.closest(".writing-pane");
+      if (parent) parent.scrollTop = saved.parentScroll;
+    });
+    const range = editor.state.selection.main;
+    selection.current(editor.state.sliceDoc(range.from, range.to));
     return () => {
+      cancelAnimationFrame(restore);
+      rememberEditor(memoryKey, editor);
       editor.destroy();
       view.current = null;
     };
@@ -255,21 +279,68 @@ export default function Editor({
     return () => window.removeEventListener("veltrite:goto", goto);
   }, []);
   useEffect(() => {
-    return registerEditorInsertion(path, paneId || "main", (text) => {
-      const editor = view.current;
-      if (!editor) throw Error("Редактор закрыт");
-      const { from, to } = editor.state.selection.main;
-      editor.dispatch({
-        changes: { from, to, insert: text },
-        selection: { anchor: from + text.length },
-        scrollIntoView: true,
-      });
-      editor.focus();
-    });
+    return registerEditorInsertion(
+      path,
+      paneId || "main",
+      (text) => {
+        const editor = view.current;
+        if (!editor) throw Error("Редактор закрыт");
+        const { from, to } = editor.state.selection.main;
+        editor.dispatch({
+          changes: { from, to, insert: text },
+          selection: { anchor: from + text.length },
+          scrollIntoView: true,
+        });
+        editor.focus();
+      },
+      () => {
+        const editor = view.current!;
+        return {
+          content: editor.state.doc.toString(),
+          from: editor.state.selection.main.from,
+          to: editor.state.selection.main.to,
+        };
+      },
+    );
   }, []);
+  useEffect(
+    () =>
+      registerEditorActions(path, paneId || "main", (action) => {
+        const editor = view.current;
+        if (!editor) return;
+        if (action === "fold") {
+          foldAll(editor);
+          return;
+        }
+        if (action === "unfold") {
+          unfoldAll(editor);
+          return;
+        }
+        const range = editor.state.selection.main;
+        const change = editorAction(
+          editor.state.doc.toString(),
+          range.from,
+          range.to,
+          action,
+        );
+        editor.dispatch({
+          changes: { from: change.from, to: change.to, insert: change.insert },
+          selection: { anchor: change.anchor, head: change.head },
+          scrollIntoView: true,
+          userEvent: "input.format",
+        });
+        editor.focus();
+      }),
+    [],
+  );
   return (
     <div
-      className={"editor-host " + (live ? "live-editor" : "source-editor")}
+      className={
+        "editor-host " +
+        (live
+          ? "live-editor markdown-source-view mod-cm6"
+          : "source-editor markdown-source-view mod-cm6")
+      }
       ref={host}
     />
   );

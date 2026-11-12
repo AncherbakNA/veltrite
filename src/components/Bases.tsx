@@ -1,18 +1,23 @@
-import { ArrowUpDown, FileText, Filter, Table2 } from "lucide-react";
+import { ArrowUpDown, FileText, Filter, SlidersHorizontal, Table2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { parse as parseYaml, stringify } from "yaml";
-import { matchesFilter, rowEvaluator } from "../../shared/bases";
-import { frontmatter } from "../../shared/markdown";
+import { parse as parseYaml } from "yaml";
+import { displayBaseText, type BaseDisplayValue } from "../../shared/base-display";
+import { writeBaseDocument } from "../../shared/base-document";
+import { editFrontmatter } from "../../shared/frontmatter-edit";
 import {
   parseProperty,
   propertyType,
   propertyTypes,
   type PropertyType,
 } from "../../shared/properties";
-import { coordinates, summarize, summaryTypes } from "../../shared/summaries";
+import { summaryTypes } from "../../shared/summaries";
+import { formatDate } from "../../shared/templates";
 import type { FileEntry, NoteIndex } from "../../shared/types";
+import { useBaseQuery } from "../useBaseQuery";
 import { api } from "../useVault";
 import BaseMap from "./BaseMap";
+import BaseSettings from "./BaseSettings";
+import BaseValue from "./BaseValue";
 import Pagination, { usePagination } from "./Pagination";
 
 function PropertyCheckbox({
@@ -46,12 +51,7 @@ function PropertyCheckbox({
     />
   );
 }
-function display(value: unknown): string {
-  if (value == null) return "";
-  if (value instanceof Date) return value.toLocaleString("ru-RU");
-  if (Array.isArray(value)) return value.map(display).join(", ");
-  return String(value);
-}
+const display = (value: unknown) => displayBaseText(value as BaseDisplayValue);
 
 export default function Bases({
   content,
@@ -59,13 +59,30 @@ export default function Bases({
   files,
   onOpen,
   onChange,
+  path = "",
+  contextPath,
+  types = {},
+  onLink,
+  beforePropertyChange,
+  initialView,
+  readOnlyDefinition = false,
 }: {
   content: string;
+  path?: string;
+  contextPath?: string;
+  initialView?: string;
+  readOnlyDefinition?: boolean;
+  types?: Record<string, string>;
+  onLink?: (target: string, from: string) => void;
+  beforePropertyChange?: () => Promise<unknown>;
   index: NoteIndex[];
   files: FileEntry[];
   onOpen: (path: string) => void;
   onChange: (content: string) => void;
 }) {
+  const [configuring, setConfiguring] = useState(false);
+  const writeConfiguration = (next: Record<string, any>) =>
+    writeBaseDocument(content, next);
   const [filter, setFilter] = useState(""),
     [sort, setSort] = useState<string | null>(null),
     [ascending, setAscending] = useState(true),
@@ -109,120 +126,95 @@ export default function Bases({
       throw Error("Некорректные формулы");
     return value;
   }, [content]);
-  const views =
-    Array.isArray(parsed.views) && parsed.views.length
-      ? parsed.views
-      : [{ type: "table", name: "Все заметки" }];
+  const views = useMemo(
+    () =>
+      Array.isArray(parsed.views) && parsed.views.length
+        ? parsed.views
+        : [{ type: "table", name: "Все заметки" }],
+    [parsed],
+  );
+  useEffect(() => {
+    if (initialView) {
+      const position = views.findIndex((view: any) => view.name === initialView);
+      if (position >= 0) setViewIndex(position);
+    }
+  }, [initialView, views]);
   const view = views[Math.min(viewIndex, views.length - 1)],
     knownViews = ["table", "cards", "list", "kanban", "map"];
-  const columns: string[] = Array.isArray(view.order)
-    ? view.order
-    : [
-        "file.name",
-        "tags",
-        ...new Set(
-          index
-            .flatMap((n) => Object.keys(n.properties))
-            .filter((k) => !["aliases", "tags"].includes(k)),
-        ),
-        ...Object.keys(parsed.formulas || {}).map((key) => "formula." + key),
-      ];
-  const { rows, warnings } = useMemo(() => {
-    const warnings = new Set<string>(),
-      known = new Map(index.map((note) => [note.path, note]));
-    let rows = files
-      .filter((file) => file.kind !== "folder")
-      .map((file) => {
-        const note = known.get(file.path) || {
+  const columns: string[] = (
+    Array.isArray(view.order)
+      ? view.order
+      : [
+          "file.name",
+          "tags",
+          ...new Set(
+            index
+              .flatMap((n) => Object.keys(n.properties))
+              .filter((k) => !["aliases", "tags"].includes(k)),
+          ),
+          ...Object.keys(parsed.formulas || {}).map((key) => "formula." + key),
+        ]
+  ).slice(0, 100);
+  const [total, setTotal] = useState(0);
+  const pagination = usePagination(
+    total,
+    JSON.stringify([viewIndex, view.type, filter, sort, ascending]),
+  );
+  const query = useBaseQuery(
+    {
+      index,
+      files,
+      document: parsed,
+      view,
+      columns: columns.slice(0, 100),
+      filter,
+      sort,
+      ascending,
+      path,
+      contextPath,
+      types,
+    },
+    pagination.start,
+    pagination.size,
+  );
+  useEffect(() => setTotal(query.data.order.length), [query.data.order.length]);
+  const metadata = useMemo(() => {
+    const notes = new Map(index.map((note) => [note.path, note]));
+    const entries = new Map(files.map((file) => [file.path, file]));
+    for (const file of files)
+      if (file.kind !== "folder" && !notes.has(file.path))
+        notes.set(file.path, {
           path: file.path,
-          title: file.name.replace(/\.md$/i, ""),
+          title: file.name.replace(/\.[^.]+$/, ""),
           aliases: [],
           tags: [],
           links: [],
-          headings: [],
           properties: {},
+          headings: [],
           words: 0,
-        };
-        const evaluator = rowEvaluator(note, file, index, parsed.formulas || {});
-        return { note, file, evaluator };
-      })
-      .filter((row) => {
-        if (
-          filter &&
-          ![
-            row.note.title,
-            row.note.path,
-            ...Object.values(row.note.properties).map(String),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(filter.toLowerCase())
-        )
-          return false;
-        try {
-          return (
-            matchesFilter(parsed.filters, row.evaluator.evaluate) &&
-            matchesFilter(view.filters, row.evaluator.evaluate)
-          );
-        } catch (error: any) {
-          warnings.add(error.message);
-          return true;
-        }
-      });
-    const property = sort || view.sort?.[0]?.property || "file.name",
-      direction = sort
-        ? ascending
-          ? 1
-          : -1
-        : view.sort?.[0]?.direction === "DESC"
-          ? -1
-          : 1;
-    rows.sort((a, b) => {
-      try {
-        const av = a.evaluator.get(property),
-          bv = b.evaluator.get(property);
-        if (typeof av === "number" && typeof bv === "number")
-          return (av - bv) * direction;
-        return (
-          display(av).localeCompare(display(bv), "ru", { numeric: true }) * direction
-        );
-      } catch (error: any) {
-        warnings.add(error.message);
-        return 0;
-      }
-    });
-    if (Number.isInteger(view.limit) && view.limit > 0) rows = rows.slice(0, view.limit);
-    return { rows, warnings: [...warnings] };
-  }, [files, index, parsed, view, filter, sort, ascending]);
-  const pagination = usePagination(
-    rows.length,
-    JSON.stringify([viewIndex, view.type, filter, sort, ascending]),
-  );
+        });
+    return { notes, entries };
+  }, [index, files]);
+  const rows = useMemo(() => {
+    const values = new Map(query.data.values.map((row) => [row.path, row.values]));
+    return query.data.order
+      .filter((path) => metadata.entries.has(path))
+      .map((path) => ({
+        note: metadata.notes.get(path)!,
+        file: metadata.entries.get(path)!,
+        evaluator: { get: (column: string) => values.get(path)?.[column] },
+      }));
+  }, [query.data, metadata]);
+  const warnings = query.data.warnings;
   const visibleRows = rows.slice(pagination.start, pagination.start + pagination.size);
-  const get = (row: (typeof rows)[number], column: string) => {
-    try {
-      return display(row.evaluator.get(column));
-    } catch (error: any) {
-      return "⚠ " + error.message;
-    }
-  };
-  const mapPoints = useMemo(
-    () =>
-      rows.flatMap((row) => {
-        const point = coordinates(
-          row.evaluator.get(view.latitude || "latitude"),
-          row.evaluator.get(view.longitude || "longitude"),
-        );
-        return point
-          ? [{ path: row.note.path, title: row.note.title, coordinates: point }]
-          : [];
-      }),
-    [rows, view.latitude, view.longitude],
-  );
+  const get = (row: (typeof rows)[number], column: string) =>
+    display(row.evaluator.get(column));
+  const mapPoints = query.data.points;
   const setProperty = async (notePath: string, column: string, input: string) => {
     setEditing(null);
     setError("");
     try {
+      if (query.loading) return false;
       const property = column.replace(/^note\./, "");
       if (
         property.startsWith("file.") ||
@@ -230,8 +222,8 @@ export default function Bases({
         ["__proto__", "constructor", "prototype"].includes(property)
       )
         return;
-      const note = await api().read(notePath),
-        { properties, body } = frontmatter(note.content);
+      await beforePropertyChange?.();
+      const note = await api().read(notePath);
       let value: unknown = input;
       try {
         value = parseYaml(input, { maxAliasCount: 10 });
@@ -239,7 +231,8 @@ export default function Bases({
       const declared =
         parsed.properties?.[column]?.type ||
         parsed.properties?.["note." + property]?.type ||
-        parsed.properties?.[property]?.type;
+        parsed.properties?.[property]?.type ||
+        types[property];
       if (declared && Object.hasOwn(propertyTypes, declared))
         value = parseProperty(
           ["list", "tags"].includes(declared) && Array.isArray(value) ? value : input,
@@ -247,10 +240,7 @@ export default function Bases({
         );
       await api().write(
         notePath,
-        "---\n" +
-          stringify({ ...properties, [property]: value }).trimEnd() +
-          "\n---\n" +
-          body,
+        editFrontmatter(note.content, { set: { [property]: value } }),
         note.revision,
       );
       return true;
@@ -268,10 +258,14 @@ export default function Bases({
         </button>
       );
     const editable =
+      !query.loading &&
       row.file.kind === "note" &&
       !column.startsWith("file.") &&
       !column.startsWith("formula.");
-    const declared = parsed.properties?.[column]?.type;
+    const declared =
+      parsed.properties?.[column]?.type ||
+      parsed.properties?.[column.replace(/^note\./, "")]?.type ||
+      types[column.replace(/^note\./, "")];
     const type: PropertyType =
       declared && Object.hasOwn(propertyTypes, declared)
         ? declared
@@ -304,12 +298,28 @@ export default function Bases({
                     ? "url"
                     : "text"
           }
-          defaultValue={get(row, column)}
+          defaultValue={(() => {
+            const raw = row.note.properties[column.replace(/^note\./, "")];
+            if (raw == null) return "";
+            if (type === "date") return String(raw).slice(0, 10);
+            if (type === "datetime") {
+              const date = new Date(String(raw));
+              return Number.isFinite(+date) ? formatDate(date, "YYYY-MM-DDTHH:mm") : "";
+            }
+            return typeof raw === "object" ? JSON.stringify(raw) : String(raw);
+          })()}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
             if (event.key === "Escape") setEditing(null);
           }}
-          onBlur={(event) => setProperty(row.note.path, column, event.target.value)}
+          onChange={(event) => {
+            event.currentTarget.dataset.edited = "true";
+          }}
+          onBlur={(event) => {
+            if (event.currentTarget.dataset.edited === "true")
+              void setProperty(row.note.path, column, event.target.value);
+            else setEditing(null);
+          }}
         />
       );
     return (
@@ -318,13 +328,20 @@ export default function Bases({
         title={editable ? "Двойной щелчок — изменить свойство" : undefined}
         onDoubleClick={() => editable && setEditing({ path: row.note.path, column })}
       >
-        {column === "tags"
-          ? row.note.tags.map((tag) => (
-              <span className="tag" key={tag}>
-                {tag}
-              </span>
-            ))
-          : get(row, column) || <span className="faint">—</span>}
+        {column === "tags" ? (
+          row.note.tags.map((tag) => (
+            <span className="tag" key={tag}>
+              {tag}
+            </span>
+          ))
+        ) : (
+          <BaseValue
+            value={row.evaluator.get(column)}
+            from={row.note.path}
+            onOpen={onOpen}
+            onLink={onLink}
+          />
+        )}
       </div>
     );
   };
@@ -355,10 +372,36 @@ export default function Bases({
           : item,
       ),
     };
-    onChange(stringify(next));
+    onChange(writeConfiguration(next));
   };
   return (
     <div className="base-view">
+      {query.loading && (
+        <small className="base-loading" role="status" data-render-pending>
+          Вычисляем представление…
+        </small>
+      )}
+      {query.error && (
+        <div className="save-error" role="alert">
+          {query.error}
+        </div>
+      )}
+      {configuring && (
+        <BaseSettings
+          content={content}
+          document={parsed}
+          initialView={viewIndex}
+          defaultColumns={columns}
+          index={index}
+          types={types}
+          onClose={() => setConfiguring(false)}
+          onApply={(document, selected) => {
+            onChange(writeConfiguration(document));
+            setViewIndex(selected);
+            setSort(null);
+          }}
+        />
+      )}
       <div className="graph-toolbar">
         <div>
           <Table2 size={20} />
@@ -379,6 +422,14 @@ export default function Bases({
           <span className="badge">{rows.length}</span>
         </div>
         <div>
+          <button
+            disabled={readOnlyDefinition}
+            aria-label="Настроить базу"
+            title="Настроить базу"
+            onClick={() => setConfiguring(true)}
+          >
+            <SlidersHorizontal size={16} />
+          </button>
           <Filter size={16} />
           <input
             placeholder="Фильтр по названию и свойствам"
@@ -403,9 +454,28 @@ export default function Bases({
       {view.type === "map" ? (
         <BaseMap points={mapPoints} onOpen={onOpen} />
       ) : view.type === "cards" || view.type === "list" ? (
-        <div className={"base-cards " + (view.type === "list" ? "base-list" : "")}>
+        <div
+          className={"base-cards " + (view.type === "list" ? "base-list" : "")}
+          style={
+            view.type === "cards"
+              ? {
+                  gridTemplateColumns: `repeat(auto-fill,minmax(${Math.max(160, Math.min(500, Number(view.cardSize) || 240))}px,1fr))`,
+                }
+              : undefined
+          }
+        >
           {visibleRows.map((row) => (
             <article className="base-card" key={row.note.path}>
+              {view.type === "cards" && row.evaluator.get("$cover") && (
+                <div className="base-card-cover">
+                  <BaseValue
+                    value={row.evaluator.get("$cover")}
+                    from={row.note.path}
+                    onOpen={onOpen}
+                    onLink={onLink}
+                  />
+                </div>
+              )}
               <button className="base-card-title" onClick={() => onOpen(row.note.path)}>
                 <FileText size={17} />
                 {row.note.title}
@@ -443,12 +513,19 @@ export default function Bases({
             >
               <h3>
                 {group || "Без группы"}
-                <span className="badge">{groups.get(group)?.length || 0}</span>
+                <span className="badge">
+                  {query.data.groupCounts[group] || groups.get(group)?.length || 0}
+                </span>
               </h3>
               {groups.get(group)?.map((row) => (
                 <article
                   key={row.note.path}
-                  draggable={row.file.kind === "note"}
+                  draggable={
+                    !query.loading &&
+                    row.file.kind === "note" &&
+                    !groupProperty.startsWith("file.") &&
+                    !groupProperty.startsWith("formula.")
+                  }
                   onDragStart={(event) =>
                     event.dataTransfer.setData("text/veltrite-note", row.note.path)
                   }
@@ -478,7 +555,23 @@ export default function Bases({
             <thead>
               <tr>
                 {columns.map((column) => (
-                  <th key={column}>
+                  <th
+                    key={column}
+                    style={
+                      view.columnSize?.[column]
+                        ? {
+                            width: Math.max(
+                              80,
+                              Math.min(800, Number(view.columnSize[column]) || 180),
+                            ),
+                            minWidth: Math.max(
+                              80,
+                              Math.min(800, Number(view.columnSize[column]) || 180),
+                            ),
+                          }
+                        : undefined
+                    }
+                  >
                     <button onClick={() => changeSort(column)}>
                       {(typeof parsed.properties?.[column]?.displayName === "string"
                         ? parsed.properties[column].displayName
@@ -492,6 +585,7 @@ export default function Bases({
                     </button>
                     {!column.startsWith("file.") && !column.startsWith("formula.") && (
                       <select
+                        disabled={readOnlyDefinition}
                         className="base-property-type"
                         aria-label={"Тип " + column}
                         value={parsed.properties?.[column]?.type || ""}
@@ -506,7 +600,7 @@ export default function Bases({
                               },
                             },
                           };
-                          onChange(stringify(next));
+                          onChange(writeConfiguration(next));
                         }}
                       >
                         <option value="">Авто</option>
@@ -535,11 +629,12 @@ export default function Bases({
                 {columns.map((column) => (
                   <td key={column}>
                     <select
+                      disabled={readOnlyDefinition}
                       aria-label={"Итог " + column}
                       value={view.summaries?.[column] || ""}
                       onChange={(event) =>
                         onChange(
-                          stringify({
+                          writeConfiguration({
                             ...parsed,
                             views: views.map((item: unknown, i: number) =>
                               i === viewIndex
@@ -570,19 +665,7 @@ export default function Bases({
                     </select>
                     {view.summaries?.[column] && (
                       <strong className="base-summary">
-                        {(() => {
-                          try {
-                            return display(
-                              summarize(
-                                rows.map((row) => row.evaluator.get(column)),
-                                view.summaries[column],
-                                parsed.summaries || {},
-                              ),
-                            );
-                          } catch (error: any) {
-                            return "⚠ " + error.message;
-                          }
-                        })()}
+                        {display(query.data.summaries[column])}
                       </strong>
                     )}
                   </td>

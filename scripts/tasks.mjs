@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { build } from "esbuild";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, cpSync } from "node:fs";
 import { resolve } from "node:path";
 import { preparePackage } from "./package.mjs";
 const task = process.argv[2];
@@ -105,6 +105,10 @@ else if (task === "test") {
 } else {
   run("node_modules/vite/bin/vite.js", ["build"]);
   await bundle();
+  for (const directory of ["cmaps", "standard_fonts", "wasm"])
+    cpSync("node_modules/pdfjs-dist/" + directory, "dist/pdf/" + directory, {
+      recursive: true,
+    });
   if (task === "e2e") run("node_modules/@playwright/test/cli.js", ["test"]);
   else if (task?.startsWith("dist:")) {
     // GitHub emits absent optional secrets as empty strings; builder treats CSC_LINK="" as a file path.

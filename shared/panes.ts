@@ -20,6 +20,7 @@ export interface WorkspaceSession {
   active: string | null;
   layout?: PaneLayout;
   activePane?: string;
+  pinned?: string[];
 }
 export const singlePane = (path: string | null, id = "main"): DocumentLeaf => ({
   kind: "leaf",
@@ -115,5 +116,13 @@ export function normalizeSession(
     panels.find((p) => p.id === data.activePane) ||
     panels.find((p) => p.path === active) ||
     panels[0];
-  return { tabs, active: focused.path, layout, activePane: focused.id };
+  return {
+    tabs,
+    active: focused.path,
+    layout,
+    activePane: focused.id,
+    pinned: Array.isArray(data.pinned)
+      ? [...new Set(data.pinned.filter((path) => tabs.includes(path)))]
+      : [],
+  };
 }

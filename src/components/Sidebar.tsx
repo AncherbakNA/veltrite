@@ -19,10 +19,13 @@ import {
   Table2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { Bookmark } from "../../shared/bookmarks";
 import type { NoteIndex, SearchResult, VaultInfo } from "../../shared/types";
 import { primaryKey } from "../ui";
+import { useFileTreeInteractions } from "../useFileTreeInteractions";
 import { api } from "../useVault";
+import Bookmarks from "./Bookmarks";
 
 export type FileFilter = "all" | "note" | "canvas" | "base";
 interface SidebarProps {
@@ -32,9 +35,15 @@ interface SidebarProps {
   onOpen: (path: string) => void;
   onAction: (action: string) => void;
   onFileAction: (action: string, path: string) => void;
+  onMove: (path: string, to: string) => void;
   section: string;
   setSection: (section: string) => void;
   view: "home" | "graph" | "document" | "collection";
+  pluginButtons: ReactNode;
+  requestedSearch: { query: string; id: number } | null;
+  onBookmarkOpen: (item: Bookmark) => void;
+  onBookmarksChange: (items: Bookmark[]) => void;
+  onSaveSearch: (query: string) => void;
   filter: FileFilter;
   setFilter: (filter: FileFilter) => void;
 }
@@ -64,14 +73,23 @@ export default function Sidebar({
   onOpen,
   onAction,
   onFileAction,
+  onMove,
   section,
   setSection,
   view,
   filter,
+  requestedSearch,
+  onBookmarkOpen,
+  onBookmarksChange,
+  onSaveSearch,
+  pluginButtons,
   setFilter,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (requestedSearch) setQuery(requestedSearch.query);
+  }, [requestedSearch]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
@@ -157,6 +175,14 @@ export default function Sidebar({
     if (position >= 0) pendingReveal.current = null;
   }, [active, section, visible]);
 
+  const tree = useFileTreeInteractions({
+    visible,
+    collapsed,
+    setCollapsed,
+    scroll: scrollHost,
+    action: onFileAction,
+    move: onMove,
+  });
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       if (
@@ -285,6 +311,7 @@ export default function Sidebar({
           <CalendarDays size={17} />
           <span>Сегодня</span>
         </button>
+        {pluginButtons}
       </nav>
       <div className="sidebar-tabs" role="group" aria-label="Инструменты хранилища">
         {sections.map(([id, Icon, label]) => (
@@ -358,7 +385,17 @@ export default function Sidebar({
         {section === "files" && (
           <>
             <div
-              className={"file-tree" + (virtual ? " virtual-tree" : "")}
+              className={
+                "file-tree" +
+                (virtual ? " virtual-tree" : "") +
+                (tree.dropFolder === "" ? " drop-root" : "")
+              }
+              onDragOver={(event) => tree.over(event, "")}
+              onDrop={(event) => tree.drop(event, "")}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node))
+                  tree.clear();
+              }}
               style={
                 virtual
                   ? { paddingTop: first * 28, paddingBottom: (visible.length - end) * 28 }
@@ -381,10 +418,42 @@ export default function Sidebar({
                     className={
                       "tree-row kind-" +
                       file.kind +
-                      (active === file.path && view === "document" ? " active" : "")
+                      (active === file.path && view === "document" ? " active" : "") +
+                      (tree.dropFolder === file.path ? " drag-over" : "")
                     }
                     style={{ paddingLeft: 7 + (file.path.split("/").length - 1) * 14 }}
                     key={file.path}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "copyMove";
+                      event.dataTransfer.setData(
+                        "application/x-veltrite-file",
+                        file.path,
+                      );
+                      event.dataTransfer.setData(
+                        "text/plain",
+                        file.kind === "folder"
+                          ? file.path
+                          : "[[" + file.path.replace(/\.md$/i, "") + "]]",
+                      );
+                    }}
+                    onDragEnd={tree.clear}
+                    onDragOver={(event) =>
+                      tree.over(
+                        event,
+                        file.kind === "folder"
+                          ? file.path
+                          : file.path.split("/").slice(0, -1).join("/"),
+                      )
+                    }
+                    onDrop={(event) =>
+                      tree.drop(
+                        event,
+                        file.kind === "folder"
+                          ? file.path
+                          : file.path.split("/").slice(0, -1).join("/"),
+                      )
+                    }
                     onContextMenu={(event) => {
                       event.preventDefault();
                       setContext(file.path);
@@ -392,6 +461,8 @@ export default function Sidebar({
                   >
                     <button
                       className="tree-file"
+                      data-file-path={file.path}
+                      onKeyDown={(event) => tree.key(event, file)}
                       title={file.path}
                       aria-current={
                         active === file.path && view === "document" ? "page" : undefined
@@ -437,6 +508,7 @@ export default function Sidebar({
                       <div className="file-context" role="menu">
                         {[
                           ["rename", "Переименовать / переместить"],
+                          ["bookmark", "Добавить в закладки"],
                           ["reveal", "Показать в Finder / Проводнике"],
                           ["trash", "В корзину"],
                         ].map(([action, label]) => (
@@ -512,6 +584,12 @@ export default function Sidebar({
               )}
             </div>
             {query.trim() && (
+              <button className="text-link" onClick={() => onSaveSearch(query)}>
+                <Star size={13} />
+                Сохранить запрос
+              </button>
+            )}
+            {query.trim() && (
               <small className="search-summary" aria-live="polite">
                 {searching
                   ? "Ищем в заметках…"
@@ -556,21 +634,14 @@ export default function Sidebar({
             ))}
           </div>
         )}
-        {section === "bookmarks" &&
-          (vault.preferences.bookmarks.length ? (
-            vault.preferences.bookmarks.map((path) => (
-              <button className="simple-row" key={path} onClick={() => onOpen(path)}>
-                <Star size={14} />
-                {path.replace(/\.md$/i, "")}
-              </button>
-            ))
-          ) : (
-            <div className="sidebar-empty">
-              <Star size={24} />
-              <strong>Нет закладок</strong>
-              <p>Откройте заметку и нажмите звезду вверху. Она появится здесь.</p>
-            </div>
-          ))}
+        {section === "bookmarks" && (
+          <Bookmarks
+            items={vault.preferences.bookmarkItems}
+            onChange={onBookmarksChange}
+            onOpen={onBookmarkOpen}
+            onSaveSearch={() => onSaveSearch(query)}
+          />
+        )}
         {section === "tags" &&
           (tags.length ? (
             tags.map((tag) => (

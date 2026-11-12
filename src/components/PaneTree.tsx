@@ -13,7 +13,10 @@ export default function PaneTree(props: Props) {
   if (layout.kind === "leaf")
     return (
       <section
-        className={"document-leaf" + (layout.id === activePane ? " focused-pane" : "")}
+        className={
+          "document-leaf workspace-leaf-content" +
+          (layout.id === activePane ? " focused-pane" : "")
+        }
         data-pane-id={layout.id}
         aria-label={"Панель: " + (layout.path || "пустая")}
         onPointerDownCapture={() => onFocus(layout.id)}

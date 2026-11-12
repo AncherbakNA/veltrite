@@ -3,7 +3,9 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "catalog"),
-  entries = [];
+  entries = [],
+  release =
+    "v" + JSON.parse(await readFile(join(root, "../package.json"), "utf8")).version;
 for (const [folder, kind] of [
   ["extensions", "extension"],
   ["themes", "theme"],
@@ -26,7 +28,7 @@ for (const [folder, kind] of [
       name: metadata.name,
       description: metadata.description,
       version: metadata.version,
-      revision: "v0.3.0",
+      revision: release,
       assets,
     });
   }

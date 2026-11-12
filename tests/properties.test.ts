@@ -26,7 +26,7 @@ test("формулы со списками имеют локальные value/i
   ).toBe(14);
   expect(evaluateExpression("list([1,2]).map(index + value)", {})).toEqual([1, 3]);
   expect(evaluateExpression('date("2026-01-01") + duration("2d")', {})).toEqual(
-    new Date("2026-01-03T00:00:00Z"),
+    new Date(2026, 0, 3),
   );
   expect(() => evaluateExpression("[1].map(value.constructor)", {})).toThrow(
     "Запрещённое",

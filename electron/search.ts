@@ -9,19 +9,27 @@ export function runSearch(
   signal?: AbortSignal,
   timeout = 1500,
 ): Promise<SearchResult[]> {
+  return runWorker<SearchResult[]>(workerFile, { documents, query }, signal, timeout);
+}
+export function runWorker<T>(
+  workerFile: string,
+  payload: unknown,
+  signal?: AbortSignal,
+  timeout = 1500,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(workerFile, {
       resourceLimits: { maxOldGenerationSizeMb: 256 },
     });
     let finished = false;
-    const done = (error?: Error, results: SearchResult[] = []) => {
+    const done = (error?: Error, results?: T) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", cancel);
       void worker.terminate();
       if (error) reject(error);
-      else resolve(results);
+      else resolve(results as T);
     };
     const cancel = () => done(new Error("Поиск отменён"));
     const timer = setTimeout(
@@ -42,6 +50,6 @@ export function runSearch(
     );
     signal?.addEventListener("abort", cancel, { once: true });
     if (signal?.aborted) cancel();
-    else worker.postMessage({ documents, query });
+    else worker.postMessage(payload);
   });
 }

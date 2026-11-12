@@ -20,3 +20,14 @@ export function relativeLink(from: string, to: string) {
     .map((p) => (p === ".." ? p : encodeURIComponent(p)))
     .join("/");
 }
+
+/** Empty means vault root; a leading ./ means relative to the active note's folder. */
+export function folderFile(folder: string, name: string, from = ""): string {
+  const local = folder === "." || folder.startsWith("./");
+  const base = local
+    ? [from.split("/").slice(0, -1).join("/"), folder === "." ? "" : folder.slice(2)]
+        .filter(Boolean)
+        .join("/")
+    : folder;
+  return [base, name].filter(Boolean).join("/");
+}

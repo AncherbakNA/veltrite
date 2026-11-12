@@ -1,7 +1,7 @@
 {
   "name": "veltrite",
   "productName": "Veltrite",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Локальная база знаний с Markdown и зашифрованной синхронизацией через GitHub",
   "author": "Veltrite contributors",
   "license": "MIT",
@@ -41,7 +41,11 @@
     "@fontsource/source-serif-4": "5.3.1",
     "leaflet": "1.9.4",
     "d3-force": "3.0.1",
-    "electron-updater": "6.8.12"
+    "electron-updater": "6.8.12",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/autocomplete": "6.20.4",
+    "@lezer/markdown": "1.8.1",
+    "pdfjs-dist": "6.5.438"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0",

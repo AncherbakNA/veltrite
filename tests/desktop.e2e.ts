@@ -9,6 +9,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { frontmatter } from "../shared/markdown";
 let application: ElectronApplication, page: Page, temp: string, root: string;
 const modifier = process.platform === "darwin" ? "Meta" : "Control";
 async function launch() {
@@ -40,6 +41,506 @@ test.beforeEach(async () => {
 test.afterEach(async () => {
   await application?.close();
   await fs.rm(temp, { recursive: true, force: true });
+});
+async function invokeCommand(name: string) {
+  await page.keyboard.press(`${modifier}+p`);
+  const palette = page.getByRole("dialog", { name: "Палитра команд" });
+  await palette.locator("input").fill(name);
+  await palette.getByRole("button", { name, exact: true }).click();
+}
+test("чтение: задачи, выноски, сворачивание заголовков и поиск по заметке", async () => {
+  await page.evaluate(() =>
+    window.veltrite.create(
+      "Чтение.md",
+      "# Чтение\n\n> [!warning]- Важно\n> Детали выноски.\n\n- [ ] Выполнить дело\n\n## Раздел\n\nИскомое слово.\n\nЕщё искомое слово.\n",
+    ),
+  );
+  await page.locator(".tree-file").filter({ hasText: "Чтение" }).click();
+  await page.locator(".reading-toggle").click();
+  await expect(page.locator(".callout-content")).toBeHidden();
+  await page.getByRole("button", { name: "Важно", exact: true }).click();
+  await expect(page.locator(".callout-content")).toBeVisible();
+  await page.getByRole("checkbox", { name: "Выполнить дело", exact: true }).check();
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Чтение.md"), "utf8"))
+    .toContain("- [x] Выполнить дело");
+  await page
+    .getByRole("heading", { name: "Раздел", exact: true })
+    .getByRole("button", { name: "Свернуть раздел", exact: true })
+    .click();
+  await expect(
+    page.locator(".reading-pane p").filter({ hasText: "Искомое слово." }).first(),
+  ).toBeHidden();
+  await page.keyboard.press(`${modifier}+f`);
+  await page.getByLabel("Найти в заметке", { exact: true }).fill("искомое");
+  await expect(page.locator("mark[data-find-match]")).toHaveCount(2);
+  await expect(page.locator("mark.find-current")).toBeVisible();
+  await page.getByRole("button", { name: "Следующее совпадение", exact: true }).click();
+  await expect(page.locator(".reading-find small")).toContainText("2 / 2");
+});
+test("вложения: PDF, база, холст и циклические заметки отображаются внутри чтения", async () => {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 500] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 500] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ...["First PDF page", "Second searchable page"].map((text) => {
+      const stream = `BT /F1 20 Tf 30 430 Td (${text}) Tj ET`;
+      return `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+    }),
+  ];
+  let data = "%PDF-1.4\n",
+    offsets = [0];
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(Buffer.byteLength(data));
+    data += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(data);
+  data += `xref\n0 8\n0000000000 65535 f \n${offsets
+    .slice(1)
+    .map((value) => String(value).padStart(10, "0") + " 00000 n \n")
+    .join("")}trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  await fs.writeFile(path.join(root, "Тест.pdf"), data);
+  await page.evaluate(async () => {
+    await window.veltrite.create(
+      "Встроенная.base",
+      `filters: 'file.name == "Вторая.md"'\nviews:\n  - type: table\n    name: Связи\n    order: [file.name]\n`,
+    );
+    await window.veltrite.create(
+      "Встроенный.canvas",
+      JSON.stringify({
+        nodes: [
+          {
+            id: "one",
+            type: "text",
+            text: "Карточка вложенного холста",
+            x: 0,
+            y: 0,
+            width: 300,
+            height: 150,
+          },
+        ],
+        edges: [],
+      }),
+    );
+    await window.veltrite.create("Цикл.md", "![[Вложения]]");
+    await window.veltrite.create(
+      "Вложения.md",
+      `# Вложения\n\n![[Тест.pdf#page=2]]\n\n![[Встроенная.base#Связи]]\n\n![[Встроенный.canvas]]\n\n![[Цикл]]\n\n\`\`\`base\nfilters: 'file.name == "Вторая.md"'\nviews:\n  - type: list\n    name: Встроенный список\n    order: [file.name]\n\`\`\`\n`,
+    );
+  });
+  await page.locator(".tree-file").filter({ hasText: "Вложения" }).click();
+  await page.locator(".reading-toggle").click();
+  const pdf = page.locator(".pdf-viewer");
+  await expect(pdf.locator(".textLayer")).toContainText("Second searchable page");
+  await expect(pdf.getByLabel("Страница PDF", { exact: true })).toHaveValue("2");
+  await pdf.getByRole("button", { name: "Предыдущая страница PDF", exact: true }).click();
+  await expect(pdf.locator(".textLayer")).toContainText("First PDF page");
+  await pdf.getByLabel("Найти в PDF", { exact: true }).fill("searchable");
+  await pdf.getByRole("button", { name: "Найти", exact: true }).click();
+  await expect(pdf.getByLabel("Страница PDF", { exact: true })).toHaveValue("2");
+  await expect(page.locator(".embed-content .base-table tbody tr")).toHaveCount(1);
+  await expect(page.locator(".canvas-text-preview")).toContainText(
+    "Карточка вложенного холста",
+  );
+  await expect(
+    page.locator(".inline-link").filter({ hasText: "повторное вложение" }),
+  ).toHaveCount(1);
+  await expect(page.locator(".inline-base")).toContainText("Вторая");
+  await page.evaluate(() =>
+    window.veltrite.create("Ссылка PDF.md", "[[Тест.pdf#page=2|Страница PDF]]"),
+  );
+  await page.locator(".tree-file").filter({ hasText: "Ссылка PDF" }).click();
+  await page.locator(".reading-toggle").click();
+  await page.getByRole("link", { name: "Страница PDF", exact: true }).click();
+  await expect(page.locator(".focused-pane > .pdf-viewer .textLayer")).toContainText(
+    "Second searchable page",
+  );
+});
+test("дерево файлов перемещает заметку перетаскиванием и управляется стрелками", async () => {
+  await page.evaluate(async () => {
+    await window.veltrite.mkdir("Папка");
+    await window.veltrite.create("Перенос.md", "# Перенос");
+    await window.veltrite.create("Ссылается.md", "[[Перенос]]");
+  });
+  const file = page.locator('.tree-file[data-file-path="Перенос.md"]'),
+    folder = page.locator('.tree-file[data-file-path="Папка"]');
+  await file.click();
+  await file.dragTo(folder);
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Папка/Перенос.md"), "utf8").catch(() => ""))
+    .toContain("# Перенос");
+  await expect(page.locator(".tab.active")).toContainText("Перенос");
+  expect(await fs.readFile(path.join(root, "Ссылается.md"), "utf8")).toContain(
+    "[[Папка/Перенос]]",
+  );
+  await folder.focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    page.locator('.tree-file[data-file-path="Папка/Перенос.md"]'),
+  ).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(folder).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(folder).toHaveAttribute("aria-expanded", "false");
+});
+test("слайды учитывают YAML и разделители в коде, клавиатура не выходит за последнюю страницу", async () => {
+  await page.evaluate(() =>
+    window.veltrite.create(
+      "Презентация.md",
+      "---\ntags: [deck]\n---\n# First slide\n\n```md\n---\n```\n\n---\n# Second slide\n",
+    ),
+  );
+  await page.locator(".tree-file").filter({ hasText: "Презентация" }).click();
+  await invokeCommand("Показать заметку как слайды");
+  const deck = page.getByRole("dialog", { name: "Слайды", exact: true });
+  await expect(deck.locator(".slides-controls span")).toHaveText("1 / 2");
+  await expect(
+    deck.getByRole("heading", { name: "First slide", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(deck.locator(".slides-controls span")).toHaveText("2 / 2");
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    deck.getByRole("heading", { name: "Second slide", exact: true }),
+  ).toBeVisible();
+  await expect(
+    deck.getByRole("button", { name: "Следующий слайд", exact: true }),
+  ).toBeDisabled();
+  await page.keyboard.press("Home");
+  await expect(deck.locator(".slides-controls span")).toHaveText("1 / 2");
+  await page.keyboard.press("Escape");
+  await expect(deck).toBeHidden();
+});
+test("свойства используют флажок и дату, список сохраняет запятую внутри элемента", async () => {
+  await page.evaluate(async () => {
+    await window.veltrite.create(
+      "Свойства.md",
+      "---\ndone: false\ndue: 2026-01-01\npeople: [один, два]\n---\n# Свойства",
+    );
+    await window.veltrite.preferences({
+      propertyTypes: { done: "checkbox", due: "date", people: "list" },
+    });
+  });
+  await page.locator(".tree-file").filter({ hasText: "Свойства" }).click();
+  await expect(page.locator(".cm-content")).toBeVisible();
+  if (!(await page.locator(".inspector").isVisible()))
+    await page.locator(".panel-toggle").click();
+  const inspector = page.locator(".inspector");
+  await inspector.getByLabel("Свойства", { exact: true }).click();
+  await inspector.getByRole("checkbox", { name: "Свойство done", exact: true }).check();
+  const date = inspector.getByLabel("Свойство due", { exact: true });
+  await date.fill("2026-12-24");
+  await date.press("Tab");
+  const list = inspector.getByLabel("Свойство people", { exact: true });
+  await list.fill('["один, два", "три"]');
+  await list.press("Tab");
+  await expect
+    .poll(
+      async () =>
+        frontmatter(await fs.readFile(path.join(root, "Свойства.md"), "utf8")).properties,
+    )
+    .toMatchObject({ done: true, due: "2026-12-24", people: ["один, два", "три"] });
+});
+test("PDF экспортирует содержимое только выбранной панели", async () => {
+  await page.evaluate(async () => {
+    await window.veltrite.create("Left.md", "# ONLY LEFT");
+    await window.veltrite.create("Right.md", "# VISIBLE RIGHT");
+  });
+  await page.locator(".tree-file").filter({ hasText: "Left" }).click();
+  await invokeCommand("Разделить панель вправо");
+  await page.locator(".tree-file").filter({ hasText: "Right" }).click();
+  const output = path.join(temp, "focused.pdf");
+  await application.evaluate(({ dialog }, file) => {
+    (dialog as any).showSaveDialog = async () => ({ canceled: false, filePath: file });
+  }, output);
+  await invokeCommand("Экспортировать PDF");
+  await expect
+    .poll(
+      () =>
+        fs.stat(output).then(
+          (stat) => stat.size,
+          () => 0,
+        ),
+      { timeout: 15000 },
+    )
+    .toBeGreaterThan(100);
+  await fs.copyFile(output, path.join(root, "Печатная.pdf"));
+  await page.evaluate(() => window.veltrite.create("Обновление.md", "Текст"));
+  await page.locator(".tree-file").filter({ hasText: "Печатная" }).click();
+  await expect(page.locator(".focused-pane .textLayer")).toContainText("VISIBLE RIGHT");
+  await expect(page.locator(".focused-pane .textLayer")).not.toContainText("ONLY LEFT");
+});
+test("неизменённая ячейка с некорректной датой остаётся целой после фокуса и закрытия", async () => {
+  const content = "---\ndue: не_дата\n---\n# Дата";
+  await page.evaluate(async (content) => {
+    await window.veltrite.create("Дата.md", content);
+    await window.veltrite.preferences({ propertyTypes: { due: "date" } });
+    await window.veltrite.create(
+      "Даты.base",
+      `filters: 'file.name == "Дата.md"'\nviews:\n  - type: table\n    name: Даты\n    order: [file.name, due]\n`,
+    );
+  }, content);
+  await page.locator(".tree-file").filter({ hasText: "Даты" }).click();
+  await page.locator(".base-table .editable-cell").dblclick();
+  const cell = page.getByLabel("Изменить due", { exact: true });
+  await expect(cell).toBeVisible();
+  await cell.blur();
+  await expect(cell).toBeHidden();
+  await page.locator('.tree-file[data-file-path="Дата.md"]').click();
+  await expect(page.locator(".cm-content")).toContainText("не_дата");
+  if (!(await page.locator(".inspector").isVisible()))
+    await page.locator(".panel-toggle").click();
+  await page.locator(".inspector").getByLabel("Свойства", { exact: true }).click();
+  const field = page.getByLabel("Свойство due", { exact: true });
+  await field.focus();
+  await field.blur();
+  await invokeCommand("Сохранить изменения");
+  await expect(page.locator(".cm-content")).toContainText("не_дата");
+  expect(await fs.readFile(path.join(root, "Дата.md"), "utf8")).toBe(content);
+});
+test("копирование текста использует системный буфер без разрешения браузера", async () => {
+  test.skip(!process.env.CI, "Буфер обмена проверяется только в одноразовой CI-системе");
+  await page.evaluate(() => window.veltrite.copyText("[[Синтетическая.pdf#page=2]]"));
+  expect(await application.evaluate(({ clipboard }) => clipboard.readText())).toBe(
+    "[[Синтетическая.pdf#page=2]]",
+  );
+});
+test("долгая формула базы прерывается в worker, интерфейс и исходный файл остаются доступными", async () => {
+  const content = `filters: 'file.ext == "md"'\nformulas:\n  slow: '/^(a+)+$/.matches("a".repeat(300) + "!")'\nviews:\n  - type: table\n    name: Долгая формула\n    order: [file.name, formula.slow]\n`;
+  await page.evaluate(
+    (content) => window.veltrite.create("Долгая.base", content),
+    content,
+  );
+  await page.locator(".tree-file").filter({ hasText: "Долгая" }).click();
+  await page.getByRole("button", { name: "Настроить базу", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Настройка базы", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Закрыть настройку базы", exact: true }).click();
+  await expect(page.locator(".base-view .save-error")).toContainText(
+    "слишком много времени",
+    { timeout: 12000 },
+  );
+  expect(await fs.readFile(path.join(root, "Долгая.base"), "utf8")).toBe(content);
+  await page.locator(".tree-file").filter({ hasText: "Вторая" }).click();
+  await expect(page.locator(".cm-content")).toContainText("Вторая");
+});
+test("настройка базы создаёт представление, формулу и фильтр, сохраняя комментарии", async () => {
+  await page.evaluate(() =>
+    window.veltrite.create(
+      "Проекты.base",
+      `# Мои проекты\nfilters: 'file.ext == "md"'\nviews:\n  - name: Таблица # комментарий\n    type: table\n    order: [file.name, status]\n`,
+    ),
+  );
+  await page.locator(".tree-file").filter({ hasText: "Проекты" }).click();
+  await expect(page.locator(".base-table tbody tr")).toHaveCount(2);
+  await page.getByRole("button", { name: "Настроить базу", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Настройка базы" });
+  await dialog
+    .getByRole("button", { name: "Добавить представление", exact: true })
+    .click();
+  await dialog.getByLabel("Название представления", { exact: true }).fill("Мои карточки");
+  await dialog.getByLabel("Вид представления", { exact: true }).selectOption("cards");
+  await dialog.getByRole("button", { name: "Формулы", exact: true }).click();
+  await dialog.getByRole("button", { name: "Добавить формулу", exact: true }).click();
+  await dialog
+    .getByLabel("Выражение формулы новая", { exact: true })
+    .fill('html("<strong>Карточка</strong><script>window.BAD=1</script>")');
+  await dialog.getByRole("button", { name: "Столбцы", exact: true }).click();
+  await dialog.getByRole("button", { name: "formula.новая", exact: true }).click();
+  await dialog.getByRole("button", { name: "Фильтры", exact: true }).click();
+  await dialog.getByRole("button", { name: "Выражение", exact: true }).last().click();
+  await dialog
+    .getByLabel("Выражение фильтра", { exact: true })
+    .last()
+    .fill('status == "active"');
+  await dialog
+    .getByRole("button", { name: "Сохранить настройки базы", exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".base-card")).toHaveCount(1);
+  await expect(
+    page.locator(".base-card strong").filter({ hasText: "Карточка" }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => (window as any).BAD)).toBeUndefined();
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Проекты.base"), "utf8"))
+    .toContain("# комментарий");
+  await page.getByLabel("Представление базы", { exact: true }).selectOption("0");
+  await expect(page.locator(".base-table tbody tr")).toHaveCount(2);
+});
+test("несвязанное упоминание превращается в ссылку на текущую заметку", async () => {
+  await page.evaluate(() =>
+    window.veltrite.create("Упоминание.md", "Начало — обычный текст."),
+  );
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  if (!(await page.locator(".inspector").isVisible()))
+    await page.locator(".panel-toggle").click();
+  await page.getByRole("button", { name: "Несвязанные упоминания", exact: true }).click();
+  const mention = page.locator(".mention-row").filter({ hasText: "Упоминание" });
+  await expect(mention).toHaveCount(1);
+  await mention.getByRole("button", { name: "Связать", exact: true }).click();
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Упоминание.md"), "utf8"))
+    .toContain("[Начало]");
+});
+test("закреплённая вкладка остаётся после закрытия остальных и перезапуска", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.locator(".tree-file").filter({ hasText: "Вторая" }).click();
+  await page.getByRole("tab", { name: "Начало", exact: true }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Закрепить вкладку", exact: true }).click();
+  await invokeCommand("Закрыть все незакреплённые вкладки");
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  await expect(page.locator(".pinned-tab")).toContainText("Начало");
+  await expect
+    .poll(() =>
+      page.evaluate(async () => (await window.veltrite.state()).session?.pinned || []),
+    )
+    .toEqual(["Начало.md"]);
+  await application.close();
+  await launch();
+  await expect(page.locator(".pinned-tab")).toContainText("Начало");
+});
+test("закладки на заголовок и поиск живут в группах и сохраняются после перезапуска", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await invokeCommand("Добавить заголовок в закладки");
+  await page
+    .getByRole("dialog", { name: "Палитра команд" })
+    .getByRole("button", { name: "План", exact: true })
+    .click();
+  await expect(page.locator(".bookmark-open")).toContainText("План");
+  await page.getByRole("button", { name: "Группа", exact: true }).click();
+  await page.getByLabel("Название закладки").fill("Работа");
+  await page
+    .locator(".bookmark-edit")
+    .getByRole("button", { name: "Сохранить", exact: true })
+    .click();
+  await expect(
+    page.locator(".bookmark-open").filter({ hasText: "Работа" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Изменить закладку «План»", exact: true })
+    .click();
+  const group = await page
+    .getByLabel("Переместить закладку в группу")
+    .locator("option")
+    .filter({ hasText: "Работа" })
+    .getAttribute("value");
+  await page.getByLabel("Переместить закладку в группу").selectOption(group!);
+  await page.getByRole("button", { name: "Сохранить поиск", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Сохранить поисковый запрос" })
+    .locator("input")
+    .fill("tag:начало");
+  await page
+    .getByRole("dialog", { name: "Сохранить поисковый запрос" })
+    .getByRole("button", { name: "Сохранить", exact: true })
+    .click();
+  await expect(
+    page.locator(".bookmark-open").filter({ hasText: "tag:начало" }),
+  ).toBeVisible();
+  await page.locator(".bookmark-open").filter({ hasText: "tag:начало" }).click();
+  await expect(page.getByLabel("Поиск по содержимому", { exact: true })).toHaveValue(
+    "tag:начало",
+  );
+  await application.close();
+  await launch();
+  await page.getByRole("button", { name: "Закладки", exact: true }).click();
+  await expect(
+    page.locator(".bookmark-open").filter({ hasText: "Работа" }),
+  ).toBeVisible();
+  await page.locator(".bookmark-open").filter({ hasText: "План" }).click();
+  await expect(page.locator(".tab.active")).toContainText("Начало");
+});
+test("извлечение выделения меняет исходную заметку и создаёт рабочую ссылку", async () => {
+  await page.evaluate(() =>
+    window.veltrite.create("Перенос.md", "Текст для извлечения."),
+  );
+  await page.locator(".tree-file").filter({ hasText: "Перенос" }).click();
+  await page.locator(".cm-content").click();
+  await page.keyboard.press(`${modifier}+a`);
+  await invokeCommand("Создать заметку из выделенного текста");
+  await page.getByPlaceholder("Папка/Название заметки").fill("Части/Фрагмент");
+  await page.getByRole("button", { name: "Извлечь", exact: true }).click();
+  await expect(page.locator(".tab.active")).toContainText("Фрагмент");
+  expect(await fs.readFile(path.join(root, "Части", "Фрагмент.md"), "utf8")).toBe(
+    "Текст для извлечения.",
+  );
+  expect(await fs.readFile(path.join(root, "Перенос.md"), "utf8")).toContain(
+    "[Фрагмент]",
+  );
+  await page.locator(".tree-file").filter({ hasText: "Перенос" }).click();
+  await page.getByRole("button", { name: "Чтение", exact: true }).click();
+  await page
+    .locator(".reading-pane")
+    .getByRole("link", { name: "Фрагмент", exact: true })
+    .click();
+  await expect(page.locator(".tab.active")).toContainText("Фрагмент");
+});
+test("горячая клавиша форматирует выделение, отмена работает после переключения чтения", async () => {
+  await page.evaluate(() => window.veltrite.create("Формат.md", "Слово"));
+  await page.locator(".tree-file").filter({ hasText: "Формат" }).click();
+  await page.getByRole("button", { name: "Настройки", exact: true }).click();
+  await page.getByRole("button", { name: "Горячие клавиши", exact: true }).click();
+  await page.getByLabel("Найти горячую клавишу").fill("Редактор: Жирный");
+  await page
+    .locator(".hotkey-row")
+    .getByRole("button", { name: "Назначить", exact: true })
+    .click();
+  await page.keyboard.press("F8");
+  await expect(page.locator(".hotkey-row kbd").filter({ hasText: "F8" })).toBeVisible();
+  await page.getByRole("button", { name: "Закрыть настройки", exact: true }).click();
+  await page.locator(".cm-content").click();
+  await page.keyboard.press(`${modifier}+a`);
+  await page.keyboard.press("F8");
+  await expect(page.locator(".cm-content")).toContainText("Слово");
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Формат.md"), "utf8"))
+    .toBe("**Слово**");
+  await page.getByRole("button", { name: "Чтение", exact: true }).click();
+  await page.getByRole("button", { name: "Правка", exact: true }).click();
+  await page.locator(".cm-content").click();
+  await page.keyboard.press(`${modifier}+z`);
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Формат.md"), "utf8"))
+    .toBe("Слово");
+});
+test("CSS-сниппет устанавливается, редактируется и отключается в окне настроек", async () => {
+  const file = path.join(temp, "Тестовый.css");
+  await fs.writeFile(file, "body { --test-snippet: applied; }");
+  await application.evaluate(({ dialog }, file) => {
+    (dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+  }, file);
+  await page.getByRole("button", { name: "Настройки", exact: true }).click();
+  await page.getByRole("button", { name: "Добавить сниппет", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.body).getPropertyValue("--test-snippet").trim(),
+      ),
+    )
+    .toBe("applied");
+  await page.getByRole("button", { name: "Править CSS: Тестовый", exact: true }).click();
+  await page.getByLabel("Код CSS").fill("body { --test-snippet: edited; }");
+  await page.getByRole("button", { name: "Сохранить CSS", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.body).getPropertyValue("--test-snippet").trim(),
+      ),
+    )
+    .toBe("edited");
+  await page.locator(".style-toggle input").uncheck();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.body).getPropertyValue("--test-snippet").trim(),
+      ),
+    )
+    .toBe("");
 });
 test("повреждённый холст или база доступны как исходный текст", async () => {
   const broken =
@@ -86,6 +587,55 @@ test("slash-команда и конфликт внешнего редактор
   await expect
     .poll(() => fs.readFile(path.join(root, "Моя копия.md"), "utf8").catch(() => null))
     .toContain("МОЯ НЕСОХРАНЁННАЯ ПРАВКА");
+});
+test("экспорт HTML включает вложения и шрифты, сайт сохраняет вложенные заметки", async () => {
+  await fs.writeFile(
+    path.join(root, "Точка.png"),
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  );
+  await page.evaluate(async () => {
+    await window.veltrite.create(
+      "Фрагмент.md",
+      "## Встроенный раздел\n\nСодержимое вложенной заметки.",
+    );
+    await window.veltrite.create(
+      "Экспорт.md",
+      "# Экспорт\n\n![[Точка.png]]\n\n![[Фрагмент]]\n\n$$E=mc^2$$\n\n> [!note]- Скрытая выноска\n> Текст внутри выноски.\n",
+    );
+  });
+  await page.locator(".tree-file").filter({ hasText: "Экспорт" }).click();
+  const output = path.join(temp, "note.html");
+  await application.evaluate(({ dialog }, file) => {
+    (dialog as any).showSaveDialog = async () => ({ canceled: false, filePath: file });
+  }, output);
+  await invokeCommand("Экспортировать заметку в HTML");
+  await expect
+    .poll(() => fs.readFile(output, "utf8").catch(() => ""), { timeout: 15000 })
+    .toContain("data:image/png;base64,");
+  const html = await fs.readFile(output, "utf8");
+  expect(html).toContain("data:font/woff");
+  expect(html).toContain("Содержимое вложенной заметки.");
+  expect(html).toContain("Текст внутри выноски.");
+  expect(html).not.toContain("veltrite-asset://");
+  expect(html).not.toContain('class="heading-fold"');
+  const site = path.join(temp, "exported-site");
+  await fs.mkdir(site);
+  await application.evaluate(({ dialog }, folder) => {
+    (dialog as any).showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [folder],
+    });
+  }, site);
+  await invokeCommand("Опубликовать базу знаний: экспорт сайта");
+  await expect
+    .poll(
+      () => fs.readFile(path.join(site, "notes/Экспорт.html"), "utf8").catch(() => ""),
+      { timeout: 15000 },
+    )
+    .toContain("Содержимое вложенной заметки.");
 });
 test("экспорт сайта и отдельный веб-просмотр без доступа к заметкам", async () => {
   const output = path.join(temp, "site");
@@ -374,8 +924,12 @@ test("новая заметка, свойства, закладка, истор�
   await page.getByRole("textbox", { name: "Свойство status" }).fill("готово");
   await page.getByRole("textbox", { name: "Свойство status" }).blur();
   await expect
-    .poll(() => fs.readFile(path.join(root, "Работа", "Новая.md"), "utf8"))
-    .toContain("status: готово");
+    .poll(
+      async () =>
+        frontmatter(await fs.readFile(path.join(root, "Работа", "Новая.md"), "utf8"))
+          .properties.status,
+    )
+    .toBe("готово");
   await page.getByRole("button", { name: "Настройки", exact: true }).click();
   await page.getByRole("radio", { name: "Светлая", exact: true }).check();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -887,6 +1441,117 @@ async function installScript(id: string, permissions: string[], code: string) {
   }, manifest);
   await page.evaluate(() => window.veltrite.installPlugin());
 }
+test("расширение переименовывает открытую заметку после сохранения черновика и сохраняет закрепление", async () => {
+  const permissions = ["vault.manage"];
+  await installScript(
+    "rename",
+    permissions,
+    `export default async api => { await api.commands.register("run", async () => { await api.vault.rename("Начало.md","Перенесённая.md"); }); };`,
+  );
+  await page.evaluate(
+    (permissions) => window.veltrite.togglePlugin("rename", true, permissions as any),
+    permissions,
+  );
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.getByRole("tab", { name: "Начало", exact: true }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Закрепить вкладку", exact: true }).click();
+  await page.locator(".cm-content").click();
+  await page.keyboard.press(`${modifier}+End`);
+  await page.keyboard.type(" МОЙ ЧЕРНОВИК");
+  await page.evaluate(() => window.veltrite.executePlugin("rename", "run"));
+  await expect(page.locator(".pinned-tab")).toContainText("Перенесённая");
+  await expect(page.locator(".cm-content")).toContainText("МОЙ ЧЕРНОВИК");
+  expect(await fs.readFile(path.join(root, "Перенесённая.md"), "utf8")).toContain(
+    "МОЙ ЧЕРНОВИК",
+  );
+  expect(await fs.readFile(path.join(root, "Вторая.md"), "utf8")).toContain(
+    "[[Перенесённая]]",
+  );
+  await page.evaluate(() => window.veltrite.create("Дополнительная.md", "Текст"));
+  await expect(page.locator(".pinned-tab")).toContainText("Перенесённая");
+});
+test("пример расширения открывает список заметок и переходит к выбранному файлу", async () => {
+  const manifest = path.resolve("examples/note-browser/manifest.json"),
+    permissions = ["vault.read", "workspace", "ui"];
+  await application.evaluate(({ dialog }, file) => {
+    (dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+  }, manifest);
+  await page.evaluate(() => window.veltrite.installPlugin());
+  await page.evaluate(
+    (permissions) =>
+      window.veltrite.togglePlugin("note-browser", true, permissions as any),
+    permissions,
+  );
+  await page.getByRole("button", { name: "Список заметок", exact: true }).click();
+  const view = application
+    .windows()
+    .find((window) => window.url().startsWith("veltrite-plugin://note-browser/"))!;
+  await expect(view.getByRole("heading", { name: "Заметки", exact: true })).toBeVisible();
+  await view.getByLabel("Поиск заметок", { exact: true }).fill("Вторая");
+  await expect(view.getByRole("button")).toHaveCount(1);
+  await view.getByRole("button").click();
+  await expect(page.locator(".tab.active")).toContainText("Вторая");
+  await expect
+    .poll(() =>
+      application.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()
+          .find((window) =>
+            window.webContents.getURL().startsWith("veltrite-plugin://note-browser/"),
+          )
+          ?.isVisible(),
+      ),
+    )
+    .toBe(false);
+});
+test("расширение открывает собственный интерфейс, панель и настройки; отключение убирает его кнопки", async () => {
+  const permissions = ["ui", "workspace", "vault.read", "editor.read", "storage"];
+  await installScript(
+    "interface",
+    permissions,
+    `export default async api => {
+    await api.commands.register("run", async () => {
+      const notes = await api.metadata.index();
+      document.body.replaceChildren();
+      const heading = document.createElement("h1"); heading.textContent = "Мои заметки: " + notes.length;
+      const button = document.createElement("button"); button.textContent = "Открыть вторую рядом";
+      button.onclick = async () => { await api.workspace.open("Вторая.md", { split: "row", mode: "read" }); const context = await api.editor.get(); document.body.dataset.opened = context.path; await api.storage.set("opened", context.path); };
+      document.body.append(heading, button); await api.ui.show({ title: "Мой список", width: 640, height: 480 });
+    });
+    await api.ui.addRibbon({ id: "notes", title: "Мой список", icon: "list", command: "run" });
+    await api.ui.status("Мой статус", "run"); await api.ui.registerSettings("run");
+  };`,
+  );
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.evaluate(
+    (permissions) => window.veltrite.togglePlugin("interface", true, permissions as any),
+    permissions,
+  );
+  await page.getByRole("button", { name: "Мой список", exact: true }).click();
+  const view = application
+    .windows()
+    .find((window) => window.url().startsWith("veltrite-plugin://interface/"))!;
+  await expect(
+    view.getByRole("heading", { name: "Мои заметки: 2", exact: true }),
+  ).toBeVisible();
+  expect(
+    await view.evaluate(() => ({
+      node: typeof (window as any).require,
+      bridge: typeof window.veltrite,
+    })),
+  ).toEqual({ node: "undefined", bridge: "undefined" });
+  await view.getByRole("button", { name: "Открыть вторую рядом", exact: true }).click();
+  await expect(view.locator("body")).toHaveAttribute("data-opened", "Вторая.md");
+  await expect(page.locator(".document-leaf")).toHaveCount(2);
+  await expect(page.locator(".focused-pane .reading-pane")).toContainText("Вторая");
+  await page.getByRole("button", { name: "Настройки", exact: true }).click();
+  await page.getByRole("button", { name: "Расширения", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Настроить", exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() => window.veltrite.togglePlugin("interface", false));
+  await expect(page.locator(".plugin-ribbon-button")).toHaveCount(0);
+  await expect(page.locator(".plugin-statuses")).not.toContainText("Мой статус");
+});
 test("JavaScript-расширение запрашивает разрешения и работает без Node и доступа к API окна", async () => {
   const permissions = ["vault.read", "vault.write", "editor.write", "storage"];
   await installScript(

@@ -1,71 +1,90 @@
-import { renderToStaticMarkup } from "react-dom/server";
-import { relativeLink } from "../shared/links";
-import { resolveLink } from "../shared/markdown";
-import type { FileEntry, NoteIndex } from "../shared/types";
+import { createRoot } from "react-dom/client";
+import type { FileEntry, NoteIndex, Preferences } from "../shared/types";
 import Markdown from "./components/Markdown";
+import { exportDocument } from "./exportDocument";
 import { api } from "./useVault";
-import { VaultFilesContext } from "./VaultContext";
-export async function buildStaticPages(index: NoteIndex[], files: FileEntry[]) {
-  const paths = files.filter((f) => f.kind !== "folder").map((f) => f.path),
+import { VaultFilesContext, VaultRuntimeContext } from "./VaultContext";
+/** Effects/workers finish in an off-screen document; exported output matches the reader. */
+export async function buildStaticPages(
+  index: NoteIndex[],
+  files: FileEntry[],
+  preferences?: Preferences,
+) {
+  const paths = files.filter((file) => file.kind !== "folder").map((file) => file.path),
     pages = [];
-  for (const note of index) {
-    const data = await api().read(note.path),
-      pagePath = "notes/" + note.path.replace(/\.md$/i, ".html");
-    const html = renderToStaticMarkup(
-      <VaultFilesContext.Provider value={paths}>
-        <Markdown
-          content={data.content}
-          path={note.path}
-          index={index}
-          onLink={() => {}}
-        />
-      </VaultFilesContext.Provider>,
-    );
-    const dom = new DOMParser().parseFromString(html, "text/html");
-    for (const anchor of dom.querySelectorAll("a[href]")) {
-      const original = anchor.getAttribute("href")!;
-      const target = original.startsWith("#vlt:")
-        ? decodeURIComponent(original.slice(5))
-        : original;
-      if (/^https?:|^mailto:/i.test(target)) continue;
-      const resolved = resolveLink(target, note.path, paths, index);
-      if (!resolved) continue;
-      const destination = resolved.toLowerCase().endsWith(".md")
-        ? "notes/" + resolved.replace(/\.md$/i, ".html")
-        : "files/" + resolved;
-      anchor.setAttribute(
-        "href",
-        relativeLink(pagePath, destination) +
-          (target.includes("#") ? "#" + encodeURIComponent(target.split("#")[1]) : ""),
+  const container = document.createElement("div");
+  container.inert = true;
+  container.setAttribute("aria-hidden", "true");
+  Object.assign(container.style, {
+    position: "fixed",
+    left: "-20000px",
+    top: "0",
+    width: "900px",
+    height: "auto",
+    pointerEvents: "none",
+  });
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    for (const note of index) {
+      const data = await api().read(note.path);
+      root.render(
+        <VaultFilesContext.Provider value={paths}>
+          <VaultRuntimeContext.Provider
+            value={{ files, types: preferences?.propertyTypes || {} }}
+          >
+            <Markdown
+              key={note.path}
+              content={data.content}
+              path={note.path}
+              index={index}
+              onLink={() => {}}
+            />
+          </VaultRuntimeContext.Provider>
+        </VaultFilesContext.Provider>,
       );
+      const started = performance.now();
+      let stable = 0;
+      await new Promise<void>((resolve, reject) => {
+        const ready = () => {
+          if (
+            container.querySelector<HTMLElement>(".markdown")?.dataset.markdownPath ===
+              note.path &&
+            !container.querySelector("[data-render-pending]")
+          )
+            stable++;
+          else stable = 0;
+          if (stable >= 3) resolve();
+          else if (performance.now() - started > 15000)
+            reject(Error("Не удалось подготовить страницу для экспорта: " + note.path));
+          else requestAnimationFrame(ready);
+        };
+        ready();
+      });
+      await Promise.race([
+        Promise.all(
+          [...container.querySelectorAll("img")].map((image) => {
+            image.loading = "eager";
+            return image.decode().catch(() => {});
+          }),
+        ),
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ]);
+      pages.push({
+        path: "notes/" + note.path.replace(/\.md$/i, ".html"),
+        title: note.title,
+        html: exportDocument(
+          container.querySelector<HTMLElement>(".markdown")!,
+          note.path,
+          paths,
+          index,
+          true,
+        ),
+      });
     }
-    for (const element of dom.querySelectorAll("[src]")) {
-      const source = element.getAttribute("src") || "";
-      if (source.startsWith("veltrite-asset://vault/"))
-        element.setAttribute(
-          "src",
-          relativeLink(
-            pagePath,
-            "files/" + decodeURIComponent(source.slice("veltrite-asset://vault/".length)),
-          ),
-        );
-    }
-    for (const embedded of dom.querySelectorAll(".embed-note")) {
-      const button = embedded.querySelector("button");
-      const resolved = button
-        ? resolveLink(button.textContent || "", note.path, paths, index)
-        : null;
-      if (resolved) {
-        const anchor = dom.createElement("a");
-        anchor.href = relativeLink(
-          pagePath,
-          "notes/" + resolved.replace(/\.md$/i, ".html"),
-        );
-        anchor.textContent = button!.textContent;
-        embedded.replaceChildren(anchor);
-      }
-    }
-    pages.push({ path: pagePath, title: note.title, html: dom.body.innerHTML });
+    return pages;
+  } finally {
+    root.unmount();
+    container.remove();
   }
-  return pages;
 }

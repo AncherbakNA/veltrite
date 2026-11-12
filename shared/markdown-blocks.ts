@@ -1,5 +1,6 @@
+import { maskMarkdownComments } from "./markdown-comments";
 export interface RenderedBlock {
-  kind: "table" | "math" | "mermaid";
+  kind: "table" | "math" | "mermaid" | "base";
   from: number;
   to: number;
   source: string;
@@ -56,12 +57,14 @@ export function tableCells(line: string): string[] {
 }
 
 export function renderedBlocks(source: string): RenderedBlock[] {
+  const original = source;
+  source = maskMarkdownComments(source);
   const lines = sourceLines(source),
     result: RenderedBlock[] = [];
   const add = (kind: RenderedBlock["kind"], start: number, end: number) => {
     const from = lines[start].from,
       to = lines[end].to;
-    result.push({ kind, from, to, source: source.slice(from, to) });
+    result.push({ kind, from, to, source: original.slice(from, to) });
   };
   for (let i = 0; i < lines.length; i++) {
     if (i === 0 && lines[i].text === "---") {
@@ -83,6 +86,7 @@ export function renderedBlocks(source: string): RenderedBlock[] {
         end++;
       if (end === lines.length) break;
       if (fence[2].trim() === "mermaid") add("mermaid", i, end);
+      if (fence[2].trim() === "base") add("base", i, end);
       i = end;
       continue;
     }
@@ -130,6 +134,8 @@ export interface ReferenceBlock {
   text: string;
 }
 export function referenceBlocks(source: string): ReferenceBlock[] {
+  const original = source;
+  source = maskMarkdownComments(source);
   const lines = sourceLines(source),
     result: ReferenceBlock[] = [];
   let fence: { marker: string; length: number } | null = null,
@@ -190,7 +196,7 @@ export function referenceBlocks(source: string): ReferenceBlock[] {
       from,
       to,
       line: lines[Math.max(0, begin)].number,
-      text: source
+      text: original
         .slice(from, to)
         .replace(/\s*\^[\p{L}\p{N}_-]+\s*$/u, "")
         .trimEnd(),
@@ -246,6 +252,7 @@ export interface NoteHeading {
   from: number;
 }
 export function noteHeadings(source: string): NoteHeading[] {
+  source = maskMarkdownComments(source);
   const lines = sourceLines(source),
     slug = headingSlugger(),
     result: NoteHeading[] = [];

@@ -4,6 +4,7 @@ import {
   GitBranch,
   Info,
   KeyRound,
+  Keyboard,
   LogOut,
   Palette,
   Puzzle,
@@ -19,9 +20,13 @@ import { useDialogFocus } from "../useDialogFocus";
 import { api } from "../useVault";
 import BrandMark from "./BrandMark";
 import CatalogBrowser from "./CatalogBrowser";
+import HotkeySettings from "./HotkeySettings";
+import StyleSettings from "./StyleSettings";
+import TemplateSettings from "./TemplateSettings";
 import UpdatePanel from "./UpdatePanel";
 export default function Settings({
   preferences,
+  commands,
   version,
   onInstallUpdate,
   initialTab = "appearance",
@@ -34,6 +39,7 @@ export default function Settings({
   onImport,
 }: {
   preferences: Preferences;
+  commands: { id: string; name: string }[];
   version: string;
   onInstallUpdate: () => Promise<void>;
   initialTab?: string;
@@ -90,6 +96,7 @@ export default function Settings({
   const sections = [
     ["appearance", Palette, "Оформление"],
     ["editor", TextCursorInput, "Редактор"],
+    ["hotkeys", Keyboard, "Горячие клавиши"],
     ["sync", GitBranch, "GitHub Sync"],
     ["plugins", Puzzle, "Расширения"],
     ["about", Info, "О приложении"],
@@ -268,6 +275,7 @@ export default function Settings({
                 checked={preferences.readableLineLength}
                 onChange={(v) => update({ readableLineLength: v })}
               />
+              <StyleSettings preferences={preferences} onPreferences={onPreferences} />
               <CatalogBrowser
                 kind="theme"
                 preferences={preferences}
@@ -319,12 +327,20 @@ export default function Settings({
                   />
                 </div>
               ))}
-              <div className="info-card">
-                Горячие клавиши: ⌘/Ctrl + N — заметка, O — переход, P — команды, S —
-                сохранить, Shift + S — синхронизация. ⌘/Ctrl + клик открывает [[ссылку]] в
-                редакторе.
-              </div>
+              <TemplateSettings preferences={preferences} update={update} />
+              <button className="text-link" onClick={() => setTab("hotkeys")}>
+                Настроить горячие клавиши
+              </button>
             </>
+          )}
+          {tab === "hotkeys" && (
+            <HotkeySettings
+              commands={commands}
+              value={preferences.hotkeys}
+              onChange={async (hotkeys) =>
+                onPreferences(await api().preferences({ hotkeys }))
+              }
+            />
           )}
           {tab === "sync" && (
             <>
@@ -474,7 +490,7 @@ export default function Settings({
                   <button
                     onClick={() =>
                       run(async () => {
-                        await navigator.clipboard.writeText(shownKey);
+                        await api().copyText(shownKey);
                         onMessage("Ключ скопирован");
                       })
                     }
@@ -595,6 +611,17 @@ export default function Settings({
                       });
                     }}
                   />
+                  {plugin.enabled && plugin.ui?.settings && (
+                    <button
+                      onClick={() =>
+                        void run(async () => {
+                          await api().executePlugin(plugin.id, plugin.ui!.settings!);
+                        })
+                      }
+                    >
+                      Настроить
+                    </button>
+                  )}
                   <button
                     aria-label={"Удалить расширение " + plugin.name}
                     onClick={() =>

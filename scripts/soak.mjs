@@ -43,6 +43,26 @@ await fs.writeFile(
   path.join(root, "Обзор.base"),
   'filters: file.ext == "md"\nviews:\n  - type: table\n    name: Все\n    order: [file.name, value]\n    summaries:\n      value: Sum\n',
 );
+const pdfObjects = [
+  "<< /Type /Catalog /Pages 2 0 R >>",
+  "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+  "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 500] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+  "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+];
+const pdfStream = "BT /F1 20 Tf 30 430 Td (Synthetic PDF document) Tj ET";
+pdfObjects.push(`<< /Length ${pdfStream.length} >>\nstream\n${pdfStream}\nendstream`);
+let pdf = "%PDF-1.4\n";
+const offsets = [0];
+for (const [i, object] of pdfObjects.entries()) {
+  offsets.push(Buffer.byteLength(pdf));
+  pdf += `${i + 1} 0 obj\n${object}\nendobj\n`;
+}
+const pdfXref = Buffer.byteLength(pdf);
+pdf += `xref\n0 6\n0000000000 65535 f \n${offsets
+  .slice(1)
+  .map((value) => String(value).padStart(10, "0") + " 00000 n \n")
+  .join("")}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${pdfXref}\n%%EOF`;
+await fs.writeFile(path.join(root, "Документ.pdf"), pdf);
 const env = {
   ...process.env,
   VELTRITE_TEST_MODE: "1",
@@ -93,8 +113,9 @@ try {
     await page.keyboard.press(`${modifier}+o`);
     await page.getByPlaceholder("Перейти к файлу…").fill(name);
     await page.keyboard.press("Enter");
-    const filename =
-      name === "Большой"
+    const filename = name.endsWith(".pdf")
+      ? name
+      : name === "Большой"
         ? name + ".canvas"
         : name === "Обзор"
           ? name + ".base"
@@ -155,7 +176,7 @@ try {
     await expect(page.locator(".source-editor")).toBeVisible();
     const text =
       `---\nvalue: 1\n---\n# Сеанс ${cycle}\n\n[[n1499]]\n\nЦикл ${cycle}.\n\n` +
-      "| Поле | Значение |\n| --- | --- |\n| Число | 2 |\n\n$$x^2 + y^2$$\n\n```mermaid\ngraph LR\n A[Начало] --> B[Готово]\n```\n\n";
+      "![[Документ.pdf]]\n\n> [!note]- Проверка\n> Текст выноски.\n\n| Поле | Значение |\n| --- | --- |\n| Число | 2 |\n\n$$x^2 + y^2$$\n\n```mermaid\ngraph LR\n A[Начало] --> B[Готово]\n```\n\n";
     await page.locator(".cm-content").fill(text);
     await page.keyboard.press(`${modifier}+s`);
     await expect.poll(() => fs.readFile(path.join(root, filename), "utf8")).toBe(text);
@@ -202,6 +223,10 @@ try {
     await open("Обзор");
     await expect(page.locator(".base-summary")).toHaveText(String(noteCount));
     await expect(page.locator(".base-table tbody tr")).toHaveCount(200);
+    if (cycle % 2 === 0) {
+      await open("Документ.pdf");
+      await expect(page.locator(".textLayer")).toContainText("Synthetic PDF document");
+    }
     if (cycle % 3 === 0) {
       await page.getByRole("button", { name: "Граф знаний", exact: true }).click();
       await expect(page.locator(".graph-canvas")).toBeVisible();
@@ -224,8 +249,10 @@ try {
   if (sha(await fs.readFile(path.join(root, "Большой.canvas"))) !== sha(canvas))
     throw Error("Холст изменился без правки");
   if (report.errors.length) throw Error("Ошибки renderer: " + report.errors.join("; "));
+  if (sha(await fs.readFile(path.join(root, "Документ.pdf"))) !== sha(pdf))
+    throw Error("PDF изменился без правки");
   report.completed = new Date().toISOString();
-  report.integrity = { notes: noteCount, canvasNodes: 5000, passed: true };
+  report.integrity = { notes: noteCount, canvasNodes: 5000, pdf: true, passed: true };
   const heaps = report.samples.map((sample) => sample.heapMiB);
   report.memory = {
     firstHeapMiB: heaps[0],

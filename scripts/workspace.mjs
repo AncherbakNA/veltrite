@@ -44,6 +44,8 @@ writeFileSync(
 for (const name of [
   "electron",
   "shared",
+  "sdk",
+  "examples",
   "src",
   "scripts",
   "tests",

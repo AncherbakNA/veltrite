@@ -1,7 +1,10 @@
 import type { Dispatch, SetStateAction } from "react";
 import { plural } from "../shared/format";
+import { renderTemplate } from "../shared/templates";
 import type { HistoryItem, NoteIndex, Preferences, VaultInfo } from "../shared/types";
 import type { Command, DialogData } from "./components/Dialog";
+import { exportDocument } from "./exportDocument";
+import { readingForExport } from "./navigation";
 import { api, type Tab, useVault } from "./useVault";
 export type EditorMode = "live" | "source" | "read" | "split";
 export interface PaletteState {
@@ -14,6 +17,7 @@ interface CommandContext {
   newFile: (kind: "note" | "canvas" | "base", initial?: string) => void;
   quickOpen: () => void;
   daily: () => unknown;
+  unique: () => unknown;
   setGraph: Setter<boolean>;
   setSection: Setter<string>;
   index: NoteIndex[];
@@ -36,7 +40,7 @@ interface CommandContext {
   setMode: Setter<EditorMode>;
   message: (text: string) => void;
   error: (text: string) => void;
-  selection: string;
+  compose: (operation: "extract" | "merge") => void;
   setDialog: Setter<DialogData | null>;
   setPalette: Setter<PaletteState | null>;
   tabs: Tab[];
@@ -49,6 +53,7 @@ export function buildCommands(context: CommandContext): Command[] {
     newFile,
     quickOpen,
     daily,
+    unique,
     setGraph,
     setSection,
     index,
@@ -70,8 +75,7 @@ export function buildCommands(context: CommandContext): Command[] {
     setTrash,
     setMode,
     message,
-    error,
-    selection,
+    compose,
     setDialog,
     setPalette,
     setSlides,
@@ -109,18 +113,7 @@ export function buildCommands(context: CommandContext): Command[] {
       run: quickOpen,
     },
     { id: "daily", name: "Открыть ежедневную заметку", run: daily },
-    {
-      id: "unique",
-      name: "Создать уникальную заметку",
-      run: () =>
-        newFile(
-          "note",
-          new Date()
-            .toISOString()
-            .replace(/[-:T.Z]/g, "")
-            .slice(0, 14),
-        ),
-    },
+    { id: "unique", name: "Создать уникальную заметку", run: unique },
     { id: "graph", name: "Открыть граф знаний", run: () => setGraph(true) },
     {
       id: "search",
@@ -213,7 +206,8 @@ export function buildCommands(context: CommandContext): Command[] {
             vault?.files.filter(
               (f) =>
                 f.kind === "note" &&
-                f.path.startsWith(preferences!.templatesFolder + "/"),
+                (!preferences!.templatesFolder ||
+                  f.path.startsWith(preferences!.templatesFolder + "/")),
             ) || []
           ).map((f) => ({
             id: f.path,
@@ -222,13 +216,11 @@ export function buildCommands(context: CommandContext): Command[] {
               run(async () => {
                 const data = await api().read(f.path);
                 insert(
-                  data.content
-                    .replace(/\{\{date\}\}/g, new Date().toLocaleDateString("sv-SE"))
-                    .replace(/\{\{time\}\}/g, new Date().toLocaleTimeString("ru-RU"))
-                    .replace(
-                      /\{\{title\}\}/g,
-                      current?.path.split("/").pop()?.replace(/\.md$/i, "") || "",
-                    ),
+                  renderTemplate(data.content, {
+                    title: current?.path.split("/").pop()?.replace(/\.md$/i, "") || "",
+                    dateFormat: preferences?.templateDateFormat,
+                    timeFormat: preferences?.templateTimeFormat,
+                  }),
                 );
               }),
           })),
@@ -279,8 +271,10 @@ export function buildCommands(context: CommandContext): Command[] {
       name: "Экспортировать PDF",
       run: () =>
         run(async () => {
+          if (!current) return;
+          await workspace.flush();
           setMode("read");
-          await new Promise((r) => setTimeout(r, 250));
+          await readingForExport(current.path, workspace.activePane);
           if (await api().printPdf()) message("PDF сохранён");
         }),
     },
@@ -290,13 +284,21 @@ export function buildCommands(context: CommandContext): Command[] {
       run: () =>
         run(async () => {
           if (!current) return;
+          await workspace.flush();
           setMode("read");
-          await new Promise((r) => setTimeout(r, 150));
-          const html = document.querySelector(".reading-pane .markdown")?.outerHTML || "";
+          const root = await readingForExport(current.path, workspace.activePane);
+          const html = exportDocument(
+            root,
+            current.path,
+            vault!.files
+              .filter((file) => file.kind !== "folder")
+              .map((file) => file.path),
+            index,
+          );
           if (
             await api().exportHtml(
               current.path,
-              `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Заметка</title><style>body{max-width:800px;margin:60px auto;padding:24px;font:18px/1.7 system-ui;color:#25252b}img{max-width:100%}pre{background:#f2f2f5;padding:20px;overflow:auto}a{color:#6956b4}blockquote{border-left:3px solid #aaa;padding-left:20px}</style><body>${html}</body></html>`,
+              `<!doctype html><html lang="ru" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline'; font-src data:; script-src 'none'; object-src 'none'; base-uri 'none'"><title>${current.path.replace(/[&<>"']/g, (character) => "&#" + character.charCodeAt(0) + ";")}</title><!--veltrite-styles--><style>body{max-width:850px;margin:40px auto;padding:24px;overflow:auto;font:16px/1.7 system-ui;background:#fbfaf7;color:#24221f}.markdown{max-width:none}.markdown img,.markdown video{max-width:100%;height:auto}.markdown [hidden]{display:block}pre{white-space:pre-wrap}.embed-content{overflow:visible}figure{margin:12px 0}a{color:#806342}</style></head><body>${html}</body></html>`,
             )
           )
             message("HTML сохранён");
@@ -305,58 +307,9 @@ export function buildCommands(context: CommandContext): Command[] {
     {
       id: "extract",
       name: "Создать заметку из выделенного текста",
-      run: () => {
-        if (!selection) {
-          error("Сначала выделите текст в редакторе");
-          return;
-        }
-        const text = selection;
-        setDialog({
-          title: "Заметка из выделения",
-          placeholder: "Название",
-          onSubmit: async (name) => {
-            const path = name.replace(/\.md$/i, "") + ".md";
-            await api().create(path, text);
-            await workspace.refresh();
-            await open(path);
-          },
-        });
-      },
+      run: () => compose("extract"),
     },
-    {
-      id: "compose",
-      name: "Объединить с другой заметкой",
-      run: () => {
-        if (!current?.path.toLowerCase().endsWith(".md")) return;
-        setPalette({
-          placeholder: "Перенести содержимое в…",
-          commands: index
-            .filter((n) => n.path !== current.path)
-            .map((n) => ({
-              id: n.path,
-              name: n.title,
-              run: () =>
-                run(async () => {
-                  await workspace.flush();
-                  const other = await api().read(n.path);
-                  await api().write(
-                    n.path,
-                    other.content + "\n\n---\n\n" + current.content,
-                    other.revision,
-                  );
-                  const own = await api().read(current.path);
-                  await api().write(
-                    current.path,
-                    `# Перенесено\n\nСодержимое перенесено в [[${n.path.replace(/\.md$/i, "")}]].\n`,
-                    own.revision,
-                  );
-                  await workspace.refresh();
-                  await open(n.path);
-                }),
-            })),
-        });
-      },
-    },
+    { id: "compose", name: "Объединить с другой заметкой", run: () => compose("merge") },
     {
       id: "publish",
       name: "Опубликовать базу знаний: экспорт сайта",
@@ -364,7 +317,7 @@ export function buildCommands(context: CommandContext): Command[] {
         run(async () => {
           await workspace.flush();
           const { buildStaticPages } = await import("./publish");
-          const pages = await buildStaticPages(index, vault!.files);
+          const pages = await buildStaticPages(index, vault!.files, preferences);
           const count = await api().publishSite(pages);
           if (count !== null)
             message(
@@ -423,6 +376,41 @@ export function buildCommands(context: CommandContext): Command[] {
           }),
         ),
     },
+    ...(["rename", "delete"] as const).map((operation) => ({
+      id: "workspace-" + operation,
+      name:
+        operation === "rename" ? "Переименовать набор вкладок" : "Удалить набор вкладок",
+      run: () =>
+        void run(async () =>
+          setPalette({
+            placeholder: "Выберите набор вкладок…",
+            commands: (await api().workspaces()).map((entry) => ({
+              id: entry.name,
+              name: entry.name,
+              run: () =>
+                setDialog({
+                  title:
+                    operation === "rename"
+                      ? "Переименовать набор вкладок"
+                      : "Удалить набор вкладок?",
+                  initial: entry.name,
+                  input: operation === "rename",
+                  danger: operation === "delete",
+                  confirm: operation === "rename" ? "Сохранить" : "Удалить",
+                  description:
+                    operation === "delete"
+                      ? entry.name + ". Заметки останутся в хранилище."
+                      : undefined,
+                  onSubmit: async (name) => {
+                    if (operation === "rename")
+                      await api().workspaceRename(entry.name, name);
+                    else await api().workspaceDelete(entry.name);
+                  },
+                }),
+            })),
+          }),
+        ),
+    })),
     {
       id: "reveal",
       name: "Показать папку хранилища",

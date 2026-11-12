@@ -1,0 +1,10 @@
+{
+  "id": "note-browser",
+  "name": "Список заметок",
+  "description": "Пример собственного окна, поиска и кнопки расширения",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "main": "main.js",
+  "permissions": ["vault.read", "workspace", "ui"],
+  "commands": [{ "id": "open", "name": "Открыть список заметок" }]
+}

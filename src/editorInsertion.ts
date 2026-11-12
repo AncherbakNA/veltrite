@@ -1,4 +1,13 @@
 type Insert = (text: string) => void;
+export interface EditorSnapshot {
+  content: string;
+  from: number;
+  to: number;
+}
+const snapshots = new Map<string, () => EditorSnapshot>();
+export function editorSnapshot(path: string, pane: string): EditorSnapshot | null {
+  return snapshots.get(keyOf(path, pane))?.() || null;
+}
 interface Pending {
   text: string;
   resolve: () => void;
@@ -37,9 +46,15 @@ export function insertIntoEditor(
     pending.set(key, [...queue, item]);
   });
 }
-export function registerEditorInsertion(path: string, pane: string, insert: Insert) {
+export function registerEditorInsertion(
+  path: string,
+  pane: string,
+  insert: Insert,
+  snapshot?: () => EditorSnapshot,
+) {
   const key = keyOf(path, pane);
   editors.set(key, insert);
+  if (snapshot) snapshots.set(key, snapshot);
   const queue = pending.get(key) || [];
   pending.delete(key);
   for (const item of queue) {
@@ -53,5 +68,25 @@ export function registerEditorInsertion(path: string, pane: string, insert: Inse
   }
   return () => {
     if (editors.get(key) === insert) editors.delete(key);
+    if (snapshots.get(key) === snapshot) snapshots.delete(key);
   };
+}
+
+const actions = new Map<string, (action: string) => void>();
+export function registerEditorActions(
+  path: string,
+  pane: string,
+  run: (action: string) => void,
+) {
+  const key = keyOf(path, pane);
+  actions.set(key, run);
+  return () => {
+    if (actions.get(key) === run) actions.delete(key);
+  };
+}
+export function runEditorAction(path: string, pane: string, action: string): boolean {
+  const run = actions.get(keyOf(path, pane));
+  if (!run) return false;
+  run(action);
+  return true;
 }

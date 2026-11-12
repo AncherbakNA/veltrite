@@ -6,7 +6,13 @@ import {
 } from "electron";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { EditorContext, PluginAction, PluginPermission } from "../shared/extensions";
+import type {
+  EditorContext,
+  PluginAction,
+  PluginPermission,
+  PluginUI,
+} from "../shared/extensions";
+import { editFrontmatter } from "../shared/frontmatter-edit";
 import type { PluginInfo } from "../shared/types";
 import type { Plugins } from "./plugins";
 import { Serial, type Vault } from "./vault";
@@ -15,7 +21,7 @@ interface Host {
   serial: Serial;
   changed: () => void;
   context: () => EditorContext;
-  action: (action: PluginAction) => void;
+  action: (action: PluginAction) => Promise<void>;
   pluginsChanged: () => void;
 }
 interface Instance {
@@ -28,6 +34,7 @@ interface Instance {
   active: boolean;
   activeRequests: number;
   rate: { start: number; count: number };
+  ui: PluginUI;
   ready: Promise<void>;
   acceptReady: () => void;
   rejectReady: (error: Error) => void;
@@ -102,6 +109,7 @@ export class PluginRuntime {
       active: false,
       activeRequests: 0,
       rate: { start: Date.now(), count: 0 },
+      ui: { ribbon: [], status: null, settings: null },
       ready,
       acceptReady,
       rejectReady,
@@ -123,7 +131,7 @@ export class PluginRuntime {
       callback({ cancel: !details.url.startsWith(`veltrite-plugin://${plugin.id}/`) }),
     );
     const csp =
-      "default-src 'none'; script-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'";
+      "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'";
     session.protocol.handle("veltrite-plugin", (request) => {
       const url = new URL(request.url);
       if (url.hostname !== plugin.id || request.method !== "GET")
@@ -145,6 +153,19 @@ export class PluginRuntime {
             },
           })
         : new Response(null, { status: 404 });
+    });
+    window.on("close", (event) => {
+      if (!instance.stopping) {
+        event.preventDefault();
+        window.hide();
+        contents.send("veltrite-plugin:event", "ui:closed", null);
+      }
+    });
+    window.on("unresponsive", () => {
+      if (!instance.stopping)
+        void this.fail(instance, "Интерфейс расширения перестал отвечать").catch(
+          () => {},
+        );
     });
     contents.once("destroyed", () => {
       if (!instance.stopping)
@@ -210,6 +231,10 @@ export class PluginRuntime {
     } finally {
       instance.activeRequests--;
     }
+  }
+  ui(id: string): PluginUI | undefined {
+    const instance = this.instances.get(id);
+    return instance?.active && !instance.stopping ? instance.ui : undefined;
   }
   registeredCommands(id: string) {
     const instance = this.instances.get(id);
@@ -279,21 +304,191 @@ export class PluginRuntime {
           return result;
         });
       }
+      case "vault.mkdir": {
+        this.permission(instance, "vault.write");
+        const file = string(args[0]);
+        const vault = this.host.vault();
+        return this.host.serial.run(async () => {
+          if (instance.stopping || this.host.vault() !== vault)
+            throw Error("Хранилище изменилось");
+          await vault.mkdir(file);
+          this.host.changed();
+        });
+      }
+      case "vault.rename":
+      case "vault.trash": {
+        this.permission(instance, "vault.manage");
+        const path = string(args[0]);
+        return this.host.action(
+          method === "vault.rename"
+            ? { type: "rename", path, to: string(args[1]) }
+            : { type: "trash", path },
+        );
+      }
+      case "metadata.index":
+        this.permission(instance, "vault.read");
+        return this.host.vault().index();
+      case "metadata.get": {
+        this.permission(instance, "vault.read");
+        const file = string(args[0]);
+        return (
+          (await this.host.vault().index()).find((note) => note.path === file) || null
+        );
+      }
+      case "metadata.update": {
+        this.permission(instance, "vault.write");
+        const file = string(args[0]),
+          revision = string(args[2], 64),
+          change = args[1];
+        if (
+          !change ||
+          typeof change !== "object" ||
+          JSON.stringify(change).length > 262144 ||
+          !/^[a-f0-9]{64}$/.test(revision)
+        )
+          throw Error("Некорректная правка свойств");
+        const vault = this.host.vault();
+        return this.host.serial.run(async () => {
+          if (instance.stopping || this.host.vault() !== vault)
+            throw Error("Хранилище изменилось");
+          const note = await vault.read(file);
+          if (note.revision !== revision) throw Error("Файл изменился после чтения");
+          const result = await vault.write(
+            file,
+            editFrontmatter(note.content, change),
+            revision,
+          );
+          this.host.changed();
+          return result;
+        });
+      }
+      case "workspace.open": {
+        this.permission(instance, "workspace");
+        const file = string(args[0]),
+          options = args[1] as
+            | { split?: "row" | "column"; mode?: "live" | "source" | "read" | "split" }
+            | undefined;
+        if (
+          options &&
+          (typeof options !== "object" ||
+            (options.split && !["row", "column"].includes(options.split)) ||
+            (options.mode && !["live", "source", "read", "split"].includes(options.mode)))
+        )
+          throw Error("Некорректная панель");
+        await this.host.vault().read(file);
+        return this.host.action({
+          type: "open",
+          path: file,
+          split: options?.split,
+          mode: options?.mode,
+        });
+      }
+      case "workspace.search":
+        this.permission(instance, "workspace");
+        return this.host.action({ type: "search", query: string(args[0], 500) });
+      case "workspace.graph":
+        this.permission(instance, "workspace");
+        return this.host.action({ type: "graph" });
+      case "ui.show": {
+        this.permission(instance, "ui");
+        const options = (args[0] || {}) as {
+          title?: string;
+          width?: number;
+          height?: number;
+        };
+        if (typeof options !== "object") throw Error("Некорректное окно");
+        const width = options.width ?? 640,
+          height = options.height ?? 480;
+        if (
+          !Number.isFinite(width) ||
+          width < 320 ||
+          width > 2000 ||
+          !Number.isFinite(height) ||
+          height < 200 ||
+          height > 1600
+        )
+          throw Error("Некорректный размер окна");
+        instance.window.setTitle(
+          instance.plugin.name +
+            (options.title ? " · " + string(options.title, 120) : "") +
+            " — Veltrite",
+        );
+        instance.window.setSize(Math.round(width), Math.round(height));
+        instance.window.show();
+        return;
+      }
+      case "ui.hide":
+        this.permission(instance, "ui");
+        instance.window.hide();
+        return;
+      case "ui.ribbon": {
+        this.permission(instance, "ui");
+        const value = args[0] as PluginUI["ribbon"][number];
+        if (
+          !value ||
+          typeof value !== "object" ||
+          !/^[\w-]{1,80}$/.test(value.id) ||
+          !instance.plugin.commands.some((command) => command.id === value.command)
+        )
+          throw Error("Кнопка должна ссылаться на объявленную команду");
+        if (
+          instance.ui.ribbon.length >= 4 &&
+          !instance.ui.ribbon.some((entry) => entry.id === value.id)
+        )
+          throw Error("Можно добавить до четырёх кнопок");
+        const button = {
+          id: value.id,
+          title: string(value.title, 100),
+          icon: string(value.icon || "puzzle", 40),
+          command: value.command,
+        };
+        instance.ui.ribbon = [
+          ...instance.ui.ribbon.filter((entry) => entry.id !== value.id),
+          button,
+        ];
+        this.host.pluginsChanged();
+        return;
+      }
+      case "ui.removeRibbon":
+        this.permission(instance, "ui");
+        instance.ui.ribbon = instance.ui.ribbon.filter(
+          (entry) => entry.id !== string(args[0], 80),
+        );
+        this.host.pluginsChanged();
+        return;
+      case "ui.status": {
+        this.permission(instance, "ui");
+        const text = string(args[0], 80),
+          command = args[1] === undefined ? undefined : string(args[1], 80);
+        if (command && !instance.plugin.commands.some((entry) => entry.id === command))
+          throw Error("Команда не объявлена");
+        instance.ui.status = text ? { text, ...(command ? { command } : {}) } : null;
+        this.host.pluginsChanged();
+        return;
+      }
+      case "ui.settings": {
+        this.permission(instance, "ui");
+        const command = string(args[0], 80);
+        if (!instance.plugin.commands.some((entry) => entry.id === command))
+          throw Error("Команда не объявлена");
+        instance.ui.settings = command;
+        this.host.pluginsChanged();
+        return;
+      }
       case "editor.get":
         this.permission(instance, "editor.read");
         return this.host.context();
       case "editor.insert":
       case "editor.append":
         this.permission(instance, "editor.write");
-        this.host.action({
+        return this.host.action({
           type: method === "editor.insert" ? "insert" : "append",
           text: string(args[0], 1024 * 1024),
         });
         return;
       case "notice":
         this.permission(instance, "notice");
-        this.host.action({ type: "notice", text: string(args[0], 500) });
-        return;
+        return this.host.action({ type: "notice", text: string(args[0], 500) });
       case "storage.get":
         this.permission(instance, "storage");
         return this.plugins.storage(instance.plugin.id, string(args[0], 128));
@@ -303,8 +498,11 @@ export class PluginRuntime {
         return this.plugins.storage(instance.plugin.id, string(args[0], 128), args[1]);
       case "events.subscribe": {
         const name = string(args[0], 40);
-        if (name === "vault:changed") this.permission(instance, "vault.read");
+        if (["vault:changed", "metadata:changed"].includes(name))
+          this.permission(instance, "vault.read");
+        else if (name === "workspace:changed") this.permission(instance, "workspace");
         else if (name === "editor:changed") this.permission(instance, "editor.read");
+        else if (name === "ui:closed") this.permission(instance, "ui");
         else throw Error("Неизвестное событие");
         instance.events.add(name);
         return;

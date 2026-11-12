@@ -1,6 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { normalizePath } from "./links";
 import { noteHeadings, referenceBlocks } from "./markdown-blocks";
+import { maskMarkdownComments } from "./markdown-comments";
 import type { NoteIndex } from "./types";
 function plainProperties(value: unknown, active = new Set<object>(), depth = 0): unknown {
   if (depth > 20) throw Error("Слишком глубокие свойства");
@@ -41,7 +42,8 @@ export function frontmatter(text: string): {
 }
 export function indexNote(path: string, content: string): NoteIndex {
   const { properties, body } = frontmatter(content);
-  const scrubbed = body.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, "");
+  const masked = maskMarkdownComments(body),
+    scrubbed = masked.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, "");
   const aliases = Array.isArray(properties.aliases)
     ? properties.aliases.map(String)
     : typeof properties.aliases === "string"
@@ -66,7 +68,27 @@ export function indexNote(path: string, content: string): NoteIndex {
         links.push(m[1]);
       }
     }
-  const headings = noteHeadings(content).map(({ level, text, line }) => ({
+  const propertyLinks = (value: unknown, depth = 0) => {
+    if (depth > 20) return;
+    if (typeof value === "string")
+      for (const match of value.matchAll(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g))
+        links.push(match[1].split("#")[0]);
+    else if (Array.isArray(value))
+      value.forEach((item) => propertyLinks(item, depth + 1));
+    else if (value && typeof value === "object")
+      Object.entries(value)
+        .filter(([key]) => !["tags", "aliases"].includes(key))
+        .forEach(([, item]) => propertyLinks(item, depth + 1));
+  };
+  propertyLinks(properties);
+  const embeds = [...scrubbed.matchAll(/!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g)].map(
+    (match) => match[1],
+  );
+  for (const match of scrubbed.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g))
+    if (!/^[a-z]+:/i.test(match[1])) embeds.push(match[1]);
+  const headings = noteHeadings(
+    content.slice(0, content.length - body.length) + masked,
+  ).map(({ level, text, line }) => ({
     level,
     text,
     line,
@@ -77,10 +99,13 @@ export function indexNote(path: string, content: string): NoteIndex {
     aliases,
     tags: [...tags].filter(Boolean),
     links: links.filter(Boolean),
+    embeds,
     headings,
     properties,
-    blocks: referenceBlocks(content).map(({ id, line }) => ({ id, line })),
-    words: body.match(/[\p{L}\p{N}]+/gu)?.length || 0,
+    blocks: referenceBlocks(content.slice(0, content.length - body.length) + masked).map(
+      ({ id, line }) => ({ id, line }),
+    ),
+    words: masked.match(/[\p{L}\p{N}]+/gu)?.length || 0,
   };
 }
 export function resolveLink(
