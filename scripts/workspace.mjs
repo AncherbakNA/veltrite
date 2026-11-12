@@ -48,6 +48,7 @@ for (const name of [
   "scripts",
   "tests",
   "resources",
+  "catalog",
   "docs",
   "LICENSE",
   ".prettierignore",
@@ -97,3 +98,6 @@ if (existsSync(join(work, "pnpm-lock.yaml")))
 writeFileSync(stamp, fingerprint());
 console.log(`Рабочие файлы: ${local}`);
 run(process.execPath, ["scripts/tasks.mjs", process.argv[2] || "dev"]);
+
+if (process.argv[2] === "format" && existsSync(join(source, "scripts/catalog.mjs")))
+  run(process.execPath, [join(source, "scripts/catalog.mjs")]);

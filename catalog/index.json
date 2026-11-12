@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "kind": "extension",
+      "id": "outline",
+      "name": "Содержание в заметке",
+      "description": "Вставляет список заголовков открытой заметки.",
+      "version": "1.0.0",
+      "revision": "v0.3.0",
+      "assets": [
+        {
+          "file": "manifest.json",
+          "size": 387,
+          "sha256": "2d101b9b8aedcf887e3fa741bc4e82d94e0b334e5a85b1eab6992d603fa13e06"
+        },
+        {
+          "file": "main.js",
+          "size": 879,
+          "sha256": "b694c2dfa37523e3dcf1372786cc4cae3498f11055c7ce818bd0badf5cd77a6f"
+        }
+      ]
+    },
+    {
+      "kind": "extension",
+      "id": "timestamp",
+      "name": "Дата и время",
+      "description": "Вставляет текущую дату и время в место курсора.",
+      "version": "1.0.0",
+      "revision": "v0.3.0",
+      "assets": [
+        {
+          "file": "manifest.json",
+          "size": 351,
+          "sha256": "8de5aec7df879a6e1812f006a32dfccda5fa5142ef6b028b7bacf580c93388e7"
+        },
+        {
+          "file": "main.js",
+          "size": 328,
+          "sha256": "48d3c611a5775faf04c6d94e93b0c69a058fcdbe9943ca24124464dc24aa69c3"
+        }
+      ]
+    },
+    {
+      "kind": "theme",
+      "id": "paper",
+      "name": "Бумага",
+      "description": "Тёплая палитра для длительного чтения.",
+      "version": "1.0.0",
+      "revision": "v0.3.0",
+      "assets": [
+        {
+          "file": "theme.json",
+          "size": 936,
+          "sha256": "b6ba55b26b4bc6810dc77cf07359c673ab3f87eac7fc33a37a6d890433237910"
+        }
+      ]
+    },
+    {
+      "kind": "theme",
+      "id": "slate",
+      "name": "Сланец",
+      "description": "Холодная серая палитра с синим акцентом.",
+      "version": "1.0.0",
+      "revision": "v0.3.0",
+      "assets": [
+        {
+          "file": "theme.json",
+          "size": 939,
+          "sha256": "ee8ebd35aa562dc5d2491f457cab2d9dcd488887359ce85e5ce60c4749db1842"
+        }
+      ]
+    }
+  ]
+}

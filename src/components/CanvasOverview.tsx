@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { CanvasData, CanvasNode } from "../../shared/types";
+import { usePaletteVersion } from "../usePaletteVersion";
 export default function CanvasOverview({
   data,
   transform,
@@ -15,6 +16,7 @@ export default function CanvasOverview({
   onActivate: (node: CanvasNode) => void;
   onTransform: (transform: { x: number; y: number; scale: number }) => void;
 }) {
+  const paletteVersion = usePaletteVersion();
   const canvas = useRef<HTMLCanvasElement>(null),
     pointer = useRef({ x: 0, y: 0, transform });
   useEffect(() => {
@@ -61,7 +63,7 @@ export default function CanvasOverview({
       context.strokeRect(node.x, node.y, node.width, node.height);
     }
     context.globalAlpha = 1;
-  }, [data, transform, width, height]);
+  }, [data, transform, width, height, paletteVersion]);
   return (
     <canvas
       ref={canvas}

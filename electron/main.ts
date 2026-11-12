@@ -16,6 +16,7 @@ import { pathToFileURL } from "node:url";
 import type { EditorContext, PluginPermission } from "../shared/extensions";
 import { normalizeSession, type WorkspaceSession } from "../shared/panes";
 import type { Preferences, SyncStatus } from "../shared/types";
+import { Catalog } from "./catalog";
 import { ConfigStore } from "./config";
 import { newRecoveryKey, parseRecoveryKey } from "./crypto";
 import { exportSite, type StaticPage } from "./export-site";
@@ -70,7 +71,7 @@ let watcher: FSWatcher | null = null;
 let changeTimer: NodeJS.Timeout | null = null;
 let syncTimer: NodeJS.Timeout | null = null;
 const serial = new Serial();
-let store: ConfigStore, plugins: Plugins;
+let store: ConfigStore, plugins: Plugins, catalog: Catalog;
 let syncBusy = false;
 let syncError: string | null = null;
 let login: Awaited<ReturnType<typeof beginDeviceLogin>> | null = null;
@@ -598,6 +599,27 @@ const methods: Record<string, (...args: any[]) => any> = {
     );
     await browser.loadURL(url);
   },
+  catalog: (refresh = false) => catalog.list(!!refresh),
+  catalogInstall: async (kind: "extension" | "theme", id: string) => {
+    await catalog.install(kind, id);
+    if (kind === "extension") {
+      await pluginRuntime?.stop(id);
+      mainWindow.webContents.send("plugins:changed");
+    }
+  },
+  themes: () => catalog.themes(),
+  installTheme: async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Установить тему",
+      properties: ["openFile"],
+      filters: [{ name: "Палитра Veltrite", extensions: ["json"] }],
+    });
+    if (result.canceled) return null;
+    const stat = await fs.stat(result.filePaths[0]);
+    if (stat.size > 64 * 1024) throw Error("Файл темы больше 64 КиБ");
+    return catalog.saveTheme(JSON.parse(await fs.readFile(result.filePaths[0], "utf8")));
+  },
+  removeTheme: (id: string) => catalog.removeTheme(id),
   plugins: () => plugins.list(),
   installPlugin: async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -775,6 +797,13 @@ app
   .then(async () => {
     store = new ConfigStore(app.getPath("userData"));
     plugins = new Plugins(path.join(app.getPath("userData"), "plugins"));
+    catalog = new Catalog(
+      app.getPath("userData"),
+      app.isPackaged
+        ? path.join(process.resourcesPath, "catalog")
+        : path.join(__dirname, "../catalog"),
+      plugins,
+    );
     setupIpc();
     protocol.handle("veltrite-map", async (request) => {
       const url = new URL(request.url),

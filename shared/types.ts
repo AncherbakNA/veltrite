@@ -1,7 +1,10 @@
+import type { CatalogEntry, CatalogInfo } from "./catalog";
 import type { EditorContext, PluginAction, PluginPermission } from "./extensions";
 import type { WorkspaceSession } from "./panes";
+import type { ThemeDefinition } from "./themes";
 export type Theme = "dark" | "light" | "system";
 export interface Preferences {
+  customTheme: ThemeDefinition | null;
   theme: Theme;
   fontSize: number;
   textFont: "serif" | "sans" | "mono";
@@ -19,6 +22,7 @@ export interface Preferences {
   bookmarks: string[];
 }
 export const defaultPreferences: Preferences = {
+  customTheme: null,
   theme: "dark",
   fontSize: 16,
   textFont: "serif",
@@ -249,6 +253,11 @@ export interface VeltriteAPI {
     bounds: { x: number; y: number; width: number; height: number; visible: boolean },
   ): Promise<void>;
   webCardClose(id: string): Promise<void>;
+  catalog(refresh?: boolean): Promise<CatalogInfo>;
+  catalogInstall(kind: CatalogEntry["kind"], id: string): Promise<void>;
+  themes(): Promise<ThemeDefinition[]>;
+  installTheme(): Promise<ThemeDefinition | null>;
+  removeTheme(id: string): Promise<void>;
   plugins(): Promise<PluginInfo[]>;
   installPlugin(): Promise<PluginInfo | null>;
   togglePlugin(id: string, enabled: boolean, grants?: PluginPermission[]): Promise<void>;

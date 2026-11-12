@@ -1,3 +1,4 @@
+import { validateTheme } from "../shared/themes";
 import { defaultPreferences, type Preferences } from "../shared/types";
 import { relativePath } from "./paths";
 
@@ -26,6 +27,7 @@ export function mergePreferences(base: Preferences, patch: unknown): Preferences
     !/^#[a-f0-9]{6}$/i.test(next.accent)
   )
     throw Error("Некорректные настройки");
+  next.customTheme = next.customTheme == null ? null : validateTheme(next.customTheme);
   for (const key of [
     "lineNumbers",
     "spellcheck",

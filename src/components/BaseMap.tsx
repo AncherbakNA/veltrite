@@ -1,6 +1,7 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef, useState } from "react";
+import { usePaletteVersion } from "../usePaletteVersion";
 import { api } from "../useVault";
 export interface MapPoint {
   path: string;
@@ -14,9 +15,11 @@ export default function BaseMap({
   points: MapPoint[];
   onOpen: (path: string) => void;
 }) {
+  const paletteVersion = usePaletteVersion();
   const host = useRef<HTMLDivElement>(null),
     map = useRef<L.Map | null>(null),
     markers = useRef<L.LayerGroup | null>(null);
+  const previousPoints = useRef<MapPoint[] | null>(null);
   const openRef = useRef(onOpen);
   openRef.current = onOpen;
   const [online, setOnline] = useState(false),
@@ -61,6 +64,8 @@ export default function BaseMap({
     const view = map.current,
       layer = markers.current;
     if (!view || !layer) return;
+    const refit = previousPoints.current !== points;
+    previousPoints.current = points;
     layer.clearLayers();
     const color = getComputedStyle(document.documentElement)
       .getPropertyValue("--accent")
@@ -74,12 +79,12 @@ export default function BaseMap({
         .bindPopup(label)
         .bindTooltip(point.title);
     }
-    if (points.length)
+    if (points.length && refit)
       view.fitBounds(L.latLngBounds(points.map((p) => p.coordinates)), {
         padding: [40, 40],
         maxZoom: 12,
       });
-  }, [points]);
+  }, [points, paletteVersion]);
   useEffect(() => {
     const view = map.current;
     if (!online || !view) return;

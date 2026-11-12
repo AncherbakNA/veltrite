@@ -6,6 +6,7 @@ import { linkResolver } from "../shared/graph";
 import { frontmatter, indexNote, resolveLink } from "../shared/markdown";
 import { headingId, referenceBlocks } from "../shared/markdown-blocks";
 import { leaves } from "../shared/panes";
+import { readableAccent, themeTokens } from "../shared/themes";
 import type { HistoryItem, PluginInfo, Preferences } from "../shared/types";
 import { VaultFilesContext } from "./VaultContext";
 import { buildCommands } from "./commands";
@@ -93,6 +94,18 @@ export default function App() {
         preferences.theme === "dark" ||
         (preferences.theme === "system" && system.matches);
       document.documentElement.dataset.theme = dark ? "dark" : "light";
+      const colors = preferences.customTheme?.variants[dark ? "dark" : "light"];
+      for (const token of themeTokens) {
+        if (colors)
+          document.documentElement.style.setProperty("--" + token, colors[token]);
+        else document.documentElement.style.removeProperty("--" + token);
+      }
+      if (colors)
+        document.documentElement.style.setProperty(
+          "--accent-ink",
+          readableAccent(preferences.accent, colors),
+        );
+      else document.documentElement.style.removeProperty("--accent-ink");
     };
     applyTheme();
     system.addEventListener("change", applyTheme);

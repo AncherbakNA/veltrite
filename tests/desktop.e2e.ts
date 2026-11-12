@@ -519,7 +519,7 @@ test("системная тема реагирует без перезапуск
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByRole("switch").focus();
+  await page.getByRole("button", { name: "Установить Сланец", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(
     page.getByRole("button", { name: "Оформление", exact: true }),
@@ -998,4 +998,73 @@ test("расширение не перезаписывает файл по ус�
   expect(await fs.readFile(path.join(root, "Начало.md"), "utf8")).toBe(
     "# Более свежая правка",
   );
+});
+
+test("каталог устанавливает тему без сети, оформление сохраняется после перезапуска", async () => {
+  await page.keyboard.press(`${modifier}+,`);
+  const browser = page.getByRole("region", { name: "Темы оформления", exact: true });
+  await browser.getByRole("button", { name: "Установить Сланец", exact: true }).click();
+  await browser.getByRole("button", { name: "Применить", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+      ),
+    )
+    .toBe("#171c25");
+  await page.getByRole("radio", { name: "Светлая", exact: true }).check();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+      ),
+    )
+    .toBe("#f5f7fc");
+  await page.keyboard.press("Escape");
+  await application.close();
+  await launch();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+      ),
+    )
+    .toBe("#f5f7fc");
+  await page.keyboard.press(`${modifier}+,`);
+  await page.getByRole("button", { name: "Стандартная палитра", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+      ),
+    )
+    .toBe("#fbfaf7");
+});
+test("расширение из каталога включается после разрешения и удаляется через настройки", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.keyboard.press(`${modifier}+,`);
+  await page.getByRole("button", { name: "Расширения", exact: true }).click();
+  const catalog = page.getByRole("region", { name: "Каталог расширений", exact: true });
+  await catalog
+    .getByRole("button", { name: "Установить Дата и время", exact: true })
+    .click();
+  const toggle = page.getByRole("switch", { name: "Дата и время · 1.0.0" });
+  await expect(toggle).not.toBeChecked();
+  await toggle.click();
+  await page.getByRole("button", { name: "Разрешить и включить", exact: true }).click();
+  await expect(toggle).toBeChecked();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press(`${modifier}+p`);
+  await page.getByPlaceholder("Найти команду…").fill("Дата и время: Вставить");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Начало.md"), "utf8"))
+    .toContain(String(new Date().getFullYear()));
+  await page.keyboard.press(`${modifier}+,`);
+  await page.getByRole("button", { name: "Расширения", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Удалить расширение Дата и время", exact: true })
+    .click();
+  await expect(toggle).toHaveCount(0);
+  expect(await page.evaluate(() => window.veltrite.plugins())).toEqual([]);
 });

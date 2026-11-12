@@ -1,0 +1,39 @@
+{
+  "id": "paper",
+  "name": "Бумага",
+  "description": "Тёплая палитра для длительного чтения.",
+  "version": "1.0.0",
+  "accent": "#9c6545",
+  "variants": {
+    "dark": {
+      "bg": "#201c18",
+      "panel": "#28231e",
+      "sidebar": "#25201c",
+      "ribbon": "#1b1814",
+      "surface": "#302a23",
+      "hover": "#383027",
+      "border": "#493e32",
+      "border-strong": "#6a5845",
+      "text": "#efe5d5",
+      "muted": "#c9bda9",
+      "faint": "#c5b7a1",
+      "green": "#b5cba2",
+      "red": "#edb4a1"
+    },
+    "light": {
+      "bg": "#fffcf3",
+      "panel": "#f8f2e4",
+      "sidebar": "#f2ebdc",
+      "ribbon": "#ece3d1",
+      "surface": "#f0e7d6",
+      "hover": "#e8ddc7",
+      "border": "#d8c9ac",
+      "border-strong": "#ac9672",
+      "text": "#30281c",
+      "muted": "#5d4f38",
+      "faint": "#63533b",
+      "green": "#405b31",
+      "red": "#943e2a"
+    }
+  }
+}

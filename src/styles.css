@@ -1937,3 +1937,61 @@ h3,
   color: var(--muted);
   line-height: 1.8;
 }
+.catalog-browser {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.catalog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.catalog-heading h3 {
+  font-size: 15px;
+  margin: 0;
+}
+.catalog-heading button {
+  font-size: 12px;
+}
+.catalog-list {
+  margin-top: 12px;
+}
+.catalog-entry {
+  padding: 14px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.catalog-entry small {
+  display: block;
+  color: var(--muted);
+  margin-top: 5px;
+  font-size: 12px;
+}
+.catalog-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.catalog-actions button {
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+.installed-plugin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.installed-plugin .setting-row {
+  flex: 1;
+  min-width: 0;
+}
+.installed-plugin > button {
+  font-size: 12px;
+  color: var(--muted);
+}

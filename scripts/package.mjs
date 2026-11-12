@@ -22,7 +22,10 @@ export function preparePackage() {
   const build = {
     ...manifest.build,
     electronVersion: manifest.devDependencies.electron,
-    extraResources: [{ from: resolve("resources/icon.png"), to: "icon.png" }],
+    extraResources: [
+      { from: resolve("resources/icon.png"), to: "icon.png" },
+      { from: resolve("catalog"), to: "catalog" },
+    ],
     npmRebuild: false,
     directories: {
       app: target,

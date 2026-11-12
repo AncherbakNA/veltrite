@@ -18,6 +18,7 @@ import type { PluginInfo, Preferences, SyncStatus } from "../../shared/types";
 import { useDialogFocus } from "../useDialogFocus";
 import { api } from "../useVault";
 import BrandMark from "./BrandMark";
+import CatalogBrowser from "./CatalogBrowser";
 export default function Settings({
   preferences,
   initialTab = "appearance",
@@ -261,6 +262,13 @@ export default function Settings({
                 description="Более удобное чтение длинных заметок"
                 checked={preferences.readableLineLength}
                 onChange={(v) => update({ readableLineLength: v })}
+              />
+              <CatalogBrowser
+                kind="theme"
+                preferences={preferences}
+                onPreferences={onPreferences}
+                onError={onError}
+                onMessage={onMessage}
               />
             </>
           )}
@@ -564,24 +572,36 @@ export default function Settings({
                 Установить расширение…
               </button>
               {plugins.map((plugin) => (
-                <Toggle
-                  key={plugin.id}
-                  label={`${plugin.name} · ${plugin.version}`}
-                  description={
-                    plugin.description + (plugin.error ? " · " + plugin.error : "")
-                  }
-                  checked={plugin.enabled}
-                  onChange={(enabled) => {
-                    if (enabled && plugin.main) {
-                      setPluginReview(plugin);
-                      return;
+                <div className="installed-plugin" key={plugin.id}>
+                  <Toggle
+                    label={`${plugin.name} · ${plugin.version}`}
+                    description={
+                      plugin.description + (plugin.error ? " · " + plugin.error : "")
                     }
-                    void run(async () => {
-                      await api().togglePlugin(plugin.id, enabled);
-                      setPlugins(await api().plugins());
-                    });
-                  }}
-                />
+                    checked={plugin.enabled}
+                    onChange={(enabled) => {
+                      if (enabled && plugin.main) {
+                        setPluginReview(plugin);
+                        return;
+                      }
+                      void run(async () => {
+                        await api().togglePlugin(plugin.id, enabled);
+                        setPlugins(await api().plugins());
+                      });
+                    }}
+                  />
+                  <button
+                    aria-label={"Удалить расширение " + plugin.name}
+                    onClick={() =>
+                      void run(async () => {
+                        await api().removePlugin(plugin.id);
+                        setPlugins(await api().plugins());
+                      })
+                    }
+                  >
+                    Удалить
+                  </button>
+                </div>
               ))}
               {pluginReview && (
                 <div
@@ -627,6 +647,15 @@ export default function Settings({
                   Дополнительных расширений пока нет. Основные инструменты уже встроены.
                 </div>
               )}
+              <CatalogBrowser
+                kind="extension"
+                plugins={plugins}
+                preferences={preferences}
+                onPreferences={onPreferences}
+                onError={onError}
+                onMessage={onMessage}
+                onInstalled={async () => setPlugins(await api().plugins())}
+              />
             </>
           )}
           {tab === "about" && (
@@ -661,10 +690,6 @@ export default function Settings({
                   Проверить обновления
                 </button>
               </div>
-              <p className="field-help">
-                Ранняя версия. Поддерживаются расширения из JSON-манифестов и основные
-                операции с файлами .canvas и .base.
-              </p>
             </>
           )}
         </div>

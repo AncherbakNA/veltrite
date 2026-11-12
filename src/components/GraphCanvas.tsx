@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GraphData, GraphNode } from "../../shared/graph";
+import { usePaletteVersion } from "../usePaletteVersion";
 export default function GraphCanvas({
   graph,
   active,
@@ -9,6 +10,7 @@ export default function GraphCanvas({
   active: string | null;
   onOpen: (path: string) => void;
 }) {
+  const paletteVersion = usePaletteVersion();
   const host = useRef<HTMLCanvasElement>(null),
     [size, setSize] = useState({ width: 1000, height: 660 }),
     [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 }),
@@ -101,7 +103,7 @@ export default function GraphCanvas({
       );
       context.fill();
     }
-  }, [graph, active, hover, size, transform, unit, offset.x, offset.y]);
+  }, [graph, active, hover, size, transform, unit, offset.x, offset.y, paletteVersion]);
   return (
     <div className="graph-canvas-wrap">
       <canvas

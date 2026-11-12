@@ -1,0 +1,39 @@
+{
+  "id": "slate",
+  "name": "Сланец",
+  "description": "Холодная серая палитра с синим акцентом.",
+  "version": "1.0.0",
+  "accent": "#587caa",
+  "variants": {
+    "dark": {
+      "bg": "#171c25",
+      "panel": "#1e2530",
+      "sidebar": "#1a202a",
+      "ribbon": "#131821",
+      "surface": "#252e3b",
+      "hover": "#303b4b",
+      "border": "#394759",
+      "border-strong": "#546780",
+      "text": "#e5edf8",
+      "muted": "#bccbdc",
+      "faint": "#b5c3d5",
+      "green": "#a8d4b1",
+      "red": "#efb2a8"
+    },
+    "light": {
+      "bg": "#f5f7fc",
+      "panel": "#edf1f8",
+      "sidebar": "#e8edf6",
+      "ribbon": "#e2e9f4",
+      "surface": "#e5ebf4",
+      "hover": "#dce4f0",
+      "border": "#c8d2e1",
+      "border-strong": "#99abc2",
+      "text": "#202b3b",
+      "muted": "#42536b",
+      "faint": "#4c5c73",
+      "green": "#315b3b",
+      "red": "#963c31"
+    }
+  }
+}
