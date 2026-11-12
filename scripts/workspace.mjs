@@ -14,7 +14,10 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 const source = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const local = resolve(
-  process.env.VELTRITE_LOCAL_DIR || join(source, "..", "Veltrite-local"),
+  process.env.VELTRITE_LOCAL_DIR ||
+    (process.env.CI && process.env.RUNNER_TEMP
+      ? join(process.env.RUNNER_TEMP, "Veltrite-local")
+      : join(source, "..", "Veltrite-local")),
 );
 const relativeLocal = relative(source, local);
 if (

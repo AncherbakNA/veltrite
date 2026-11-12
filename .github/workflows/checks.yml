@@ -34,7 +34,7 @@ jobs:
         with:
           name: Ошибка-${{ matrix.os }}
           path: |
-            ../Veltrite-local/playwright-report
-            ../Veltrite-local/test-results
+            ${{ runner.temp }}/Veltrite-local/playwright-report
+            ${{ runner.temp }}/Veltrite-local/test-results
           retention-days: 7
           if-no-files-found: ignore

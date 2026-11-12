@@ -336,6 +336,9 @@ test("создание холста, изменение карточки и со
   await page.screenshot({ path: "../screenshots/canvas.png" });
 });
 test("новая заметка, свойства, закладка, история и восстановление из корзины", async () => {
+  await application.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setSize(940, 680),
+  );
   await page.getByRole("button", { name: "Новая заметка", exact: true }).click();
   await page.getByPlaceholder("Папка/Название").fill("Работа/Новая");
   await page.getByRole("button", { name: "Создать", exact: true }).click();
@@ -346,6 +349,8 @@ test("новая заметка, свойства, закладка, истор�
   await page.keyboard.press(`${modifier}+s`);
   await page.getByRole("button", { name: "Закладка", exact: true }).click();
   await expect(page.locator(".starred")).toBeVisible();
+  if (!(await page.locator(".inspector").isVisible()))
+    await page.locator(".panel-toggle").click();
   await page.getByRole("button", { name: "Свойства", exact: true }).click();
   await page.getByRole("button", { name: "Добавить свойство" }).click();
   await page.getByPlaceholder("Название свойства").fill("status");
@@ -478,12 +483,16 @@ test("системная тема реагирует без перезапуск
   await settings.click();
   await page.getByRole("radio", { name: "Системная", exact: true }).check();
   await expect
-    .poll(
-      async () =>
-        JSON.parse(
+    .poll(async () => {
+      try {
+        return JSON.parse(
           await fs.readFile(path.join(root, ".veltrite", "preferences.json"), "utf8"),
-        ).theme,
-    )
+        ).theme;
+      } catch (error: any) {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      }
+    })
     .toBe("system");
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
