@@ -1,0 +1,56 @@
+@media print {
+  body {
+    overflow: visible;
+    background: white;
+    color: black;
+  }
+  .titlebar,
+  .sidebar,
+  .tabbar,
+  .document-toolbar,
+  .inspector,
+  .statusbar,
+  .toast,
+  .overlay {
+    display: none !important;
+  }
+  .app-shell,
+  .main-layout,
+  .workspace,
+  .document-content,
+  .reading-pane {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+  .writing-pane {
+    display: none !important;
+  }
+  .reading-pane {
+    padding: 0 !important;
+  }
+  .reading-pane .markdown {
+    max-width: none !important;
+    color: #222 !important;
+    font-size: 12pt !important;
+  }
+  .markdown pre,
+  .markdown blockquote {
+    break-inside: avoid;
+  }
+  .markdown a {
+    color: #555 !important;
+  }
+  .markdown img {
+    max-height: 24cm;
+  }
+  .markdown h1,
+  .markdown h2,
+  .markdown h3 {
+    break-after: avoid;
+  }
+  .markdown pre {
+    white-space: pre-wrap;
+  }
+}

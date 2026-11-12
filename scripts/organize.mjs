@@ -21,6 +21,8 @@ const host = {
 const service = ts.createLanguageService(host);
 let count = 0;
 for (const file of parsed.fileNames) {
+  // Порядок побочных импортов CSS задаёт каскад; здесь он намеренный.
+  if (relative(workspace, file).replaceAll("\\", "/") === "src/main.tsx") continue;
   for (const edit of service.organizeImports(
     { type: "file", fileName: file },
     { newLineCharacter: "\n" },

@@ -1,5 +1,6 @@
 import { Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useDialogFocus } from "../useDialogFocus";
 export interface DialogData {
   title: string;
   description?: string;
@@ -21,6 +22,7 @@ export function Dialog({
 }) {
   const [value, setValue] = useState(data.initial || ""),
     [busy, setBusy] = useState(false);
+  const dialog = useDialogFocus<HTMLFormElement>();
   return (
     <div
       className="overlay"
@@ -29,6 +31,10 @@ export function Dialog({
       }}
     >
       <form
+        ref={dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label={data.title}
         className="modal prompt-modal"
         onSubmit={async (e) => {
           e.preventDefault();
@@ -94,10 +100,16 @@ export function CommandPalette({
 }) {
   const [query, setQuery] = useState(""),
     [selected, setSelected] = useState(0);
+  const dialog = useDialogFocus<HTMLDivElement>();
   const filtered = commands
     .filter((c) => c.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
     .slice(0, 80);
   useEffect(() => setSelected(0), [query]);
+  useEffect(() => {
+    dialog.current
+      ?.querySelector(".command-list .selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selected, dialog]);
   const invoke = (command: Command) => {
     onClose();
     command.run();
@@ -111,7 +123,9 @@ export function CommandPalette({
     >
       <div
         className="modal palette"
+        ref={dialog}
         role="dialog"
+        aria-modal="true"
         aria-label="Палитра команд"
         onKeyDown={(e) => {
           if (e.key === "Escape") onClose();
@@ -123,7 +137,10 @@ export function CommandPalette({
             e.preventDefault();
             setSelected((i) => Math.max(0, i - 1));
           }
-          if (e.key === "Enter" && filtered[selected]) invoke(filtered[selected]);
+          if (e.key === "Enter" && filtered[selected]) {
+            e.preventDefault();
+            invoke(filtered[selected]);
+          }
         }}
       >
         <div className="palette-input">

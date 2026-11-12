@@ -1,4 +1,14 @@
-import { AlignLeft, FileText, Hash, Link2, Plus, SlidersHorizontal } from "lucide-react";
+import {
+  AlignLeft,
+  FileText,
+  Hash,
+  Link2,
+  PanelsTopLeft,
+  Plus,
+  SlidersHorizontal,
+  Table2,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { stringify as yamlStringify } from "yaml";
 import type { NoteIndex } from "../../shared/types";
@@ -15,6 +25,7 @@ interface InspectorProps {
   setSection: (section: string) => void;
   setProperty: (key: string, value: string) => void;
   setDialog: (dialog: DialogData) => void;
+  onClose: () => void;
 }
 export default function Inspector({
   currentIndex,
@@ -28,24 +39,106 @@ export default function Inspector({
   setSection,
   setProperty,
   setDialog,
+  onClose,
 }: InspectorProps) {
   const [rightTab, setRightTab] = useState("outline");
+  const canvas = /\.canvas$/i.test(currentPath || ""),
+    base = /\.base$/i.test(currentPath || "");
+  const tabs = [
+    ["outline", AlignLeft, "Содержание"],
+    ["links", Link2, "Связи"],
+    ["properties", SlidersHorizontal, "Свойства"],
+    ["footnotes", Hash, "Сноски"],
+  ] as const;
+  if (canvas || base) {
+    const Icon = canvas ? PanelsTopLeft : Table2;
+    const tips = canvas
+      ? [
+          [
+            "Добавьте карточки",
+            "Текст, заметки, изображения и ссылки — на панели над холстом.",
+          ],
+          [
+            "Покажите связи",
+            "Нажмите «Связь», затем выберите начальную и конечную карточку.",
+          ],
+          [
+            "Посмотрите шире",
+            "Инструмент «Перемещение» двигает холст. Масштаб — внизу справа.",
+          ],
+        ]
+      : [
+          [
+            "Выберите представление",
+            "Таблица, карточки, список или доска — в меню над базой.",
+          ],
+          ["Уточните выборку", "Поле фильтра ищет по названиям и значениям свойств."],
+          [
+            "Меняйте свойства на месте",
+            "Дважды нажмите на ячейку, чтобы изменить свойство заметки.",
+          ],
+        ];
+    return (
+      <aside className="inspector context-inspector" aria-label="Подсказки инструмента">
+        <div className="inspector-heading">
+          <strong>{canvas ? "Работа с холстом" : "Работа с базой"}</strong>
+          <button className="icon-button" aria-label="Закрыть панель" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="inspector-content">
+          <span className={"context-tool-icon " + (canvas ? "kind-canvas" : "kind-base")}>
+            <Icon size={27} />
+          </span>
+          <h3>{canvas ? "Мысли в одном пространстве" : "Порядок в ваших заметках"}</h3>
+          <p className="context-intro">
+            {canvas
+              ? "Расположите идеи рядом и покажите, как они связаны."
+              : "База показывает ваши файлы в удобном представлении."}
+          </p>
+          <ol className="tool-tips">
+            {tips.map(([title, text], i) => (
+              <li key={title}>
+                <span>{i + 1}</span>
+                <div>
+                  <strong>{title}</strong>
+                  <p>{text}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div className="inspector-footer">
+          <span className="local-indicator" />
+          Изменения сохраняются автоматически
+        </div>
+      </aside>
+    );
+  }
   return (
-    <aside className="inspector">
+    <aside className="inspector" aria-label="Информация о заметке">
+      <div className="inspector-heading">
+        <div>
+          <strong>О заметке</strong>
+          <small title={currentPath || undefined}>
+            {currentIndex?.title || currentPath}
+          </small>
+        </div>
+        <button className="icon-button" aria-label="Закрыть панель" onClick={onClose}>
+          <X size={16} />
+        </button>
+      </div>
       <div className="inspector-tabs">
-        {[
-          ["outline", AlignLeft, "Содержание"],
-          ["links", Link2, "Связи"],
-          ["properties", SlidersHorizontal, "Свойства"],
-          ["footnotes", Hash, "Сноски"],
-        ].map(([id, Icon, title]: any) => (
+        {tabs.map(([id, Icon, title]) => (
           <button
             className={rightTab === id ? "active" : ""}
             key={id}
             title={title}
+            aria-pressed={rightTab === id}
             onClick={() => setRightTab(id)}
           >
             <Icon size={16} />
+            <span>{title}</span>
           </button>
         ))}
       </div>
@@ -174,8 +267,8 @@ export default function Inspector({
         )}
       </div>
       <div className="inspector-footer">
-        <span className="mini-logo">V</span>
-        <span>Одна мысль ведёт к другой.</span>
+        <FileText size={13} />
+        <span>Markdown · Обычный файл в вашей папке</span>
       </div>
     </aside>
   );

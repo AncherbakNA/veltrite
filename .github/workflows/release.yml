@@ -23,7 +23,7 @@ jobs:
             task: dist:win
     runs-on: ${{ matrix.os }}
     env:
-      VELTRITE_RELEASE_REPOSITORY: ${{ github.repository }}
+      VELTRITE_RELEASE_REPOSITORY: ${{ github.event.repository.private == false && github.repository || '' }}
       VELTRITE_GITHUB_CLIENT_ID: ${{ vars.VELTRITE_GITHUB_CLIENT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

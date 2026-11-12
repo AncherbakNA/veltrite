@@ -350,12 +350,14 @@ export default function Canvas({
           onClick={() => add("text")}
         >
           <Plus size={18} />
+          <span>Текст</span>
         </button>
         <button
           title="Добавить заметку или изображение"
           onClick={() => onChooseFile((file) => add("file", file))}
         >
           <FileText size={17} />
+          <span>Файл</span>
         </button>
         <button
           title="Добавить ссылку"
@@ -376,6 +378,7 @@ export default function Canvas({
           }}
         >
           <ArrowUpRight size={19} />
+          <span>Связь</span>
         </button>
         {selected.length > 0 && (
           <>

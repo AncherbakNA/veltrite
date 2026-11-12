@@ -14,9 +14,12 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { PluginInfo, Preferences, SyncStatus } from "../../shared/types";
+import { useDialogFocus } from "../useDialogFocus";
 import { api } from "../useVault";
+import BrandMark from "./BrandMark";
 export default function Settings({
   preferences,
+  initialTab = "appearance",
   sync,
   onPreferences,
   onSync,
@@ -25,6 +28,7 @@ export default function Settings({
   onMessage,
 }: {
   preferences: Preferences;
+  initialTab?: string;
   sync: SyncStatus;
   onPreferences: (p: Preferences) => void;
   onSync: (s: SyncStatus) => void;
@@ -32,7 +36,8 @@ export default function Settings({
   onError: (m: string) => void;
   onMessage: (m: string) => void;
 }) {
-  const [tab, setTab] = useState("appearance"),
+  const [tab, setTab] = useState(initialTab),
+    [selectedTheme, setSelectedTheme] = useState(preferences.theme),
     [repository, setRepository] = useState(sync.repository),
     [token, setToken] = useState(""),
     [recovery, setRecovery] = useState(""),
@@ -41,6 +46,8 @@ export default function Settings({
     [busy, setBusy] = useState(false),
     [device, setDevice] = useState(""),
     [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const dialog = useDialogFocus<HTMLDivElement>();
+  useEffect(() => setSelectedTheme(preferences.theme), [preferences.theme]);
   useEffect(() => {
     api()
       .plugins()
@@ -59,6 +66,17 @@ export default function Settings({
   };
   const update = (patch: Partial<Preferences>) =>
     run(async () => onPreferences(await api().preferences(patch)));
+  const chooseTheme = (theme: Preferences["theme"]) => {
+    setSelectedTheme(theme);
+    run(async () => {
+      try {
+        onPreferences(await api().preferences({ theme }));
+      } catch (error) {
+        setSelectedTheme(preferences.theme);
+        throw error;
+      }
+    });
+  };
   const sections = [
     ["appearance", Palette, "Оформление"],
     ["editor", TextCursorInput, "Редактор"],
@@ -73,7 +91,13 @@ export default function Settings({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="modal settings-modal" role="dialog" aria-label="Настройки">
+      <div
+        ref={dialog}
+        className="modal settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Настройки"
+      >
         <nav className="settings-nav">
           <span className="eyebrow">НАСТРОЙКИ</span>
           {sections.map(([id, Icon, title]) => (
@@ -87,7 +111,7 @@ export default function Settings({
             </button>
           ))}
           <div className="settings-brand">
-            <span className="logo-small">V</span>
+            <BrandMark size={34} />
             <strong>Veltrite</strong>
             <small>Ваши мысли. Ваши файлы.</small>
           </div>
@@ -104,21 +128,46 @@ export default function Settings({
             <>
               <h2>Ваше пространство</h2>
               <p className="muted">Настройте Veltrite под себя.</p>
-              <div className="setting-row">
-                <div>
-                  <strong>Цветовая тема</strong>
-                  <small>Комфортная работа в любое время</small>
+              <fieldset className="theme-picker">
+                <legend>Цветовая тема</legend>
+                <p>Выберите оформление, в котором приятно думать.</p>
+                <div className="theme-choices">
+                  {(
+                    [
+                      ["dark", "Тёмная"],
+                      ["light", "Светлая"],
+                      ["system", "Системная"],
+                    ] as const
+                  ).map(([theme, label]) => (
+                    <label
+                      key={theme}
+                      className={
+                        "theme-choice " + (selectedTheme === theme ? "selected" : "")
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name="theme"
+                        aria-label={label}
+                        value={theme}
+                        checked={selectedTheme === theme}
+                        onChange={() => chooseTheme(theme)}
+                        disabled={busy}
+                      />
+                      <span className={"theme-sample sample-" + theme} aria-hidden="true">
+                        <i />
+                        <span>
+                          <b />
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      </span>
+                      <span className="theme-choice-label">{label}</span>
+                    </label>
+                  ))}
                 </div>
-                <select
-                  aria-label="Цветовая тема"
-                  value={preferences.theme}
-                  onChange={(e) => update({ theme: e.target.value as any })}
-                >
-                  <option value="dark">Тёмная</option>
-                  <option value="light">Светлая</option>
-                  <option value="system">Системная</option>
-                </select>
-              </div>
+              </fieldset>
               <div className="setting-row">
                 <div>
                   <strong>Акцентный цвет</strong>
@@ -482,7 +531,7 @@ export default function Settings({
               </div>
               <div className="setting-row">
                 <div>
-                  <strong>Версия 0.1.0</strong>
+                  <strong>Версия 0.2.0</strong>
                   <small>macOS · Windows</small>
                 </div>
                 <button
@@ -490,7 +539,9 @@ export default function Settings({
                     run(async () => {
                       const update = await api().checkUpdate();
                       if (!update)
-                        onMessage("Репозиторий релизов будет настроен при публикации");
+                        onMessage(
+                          "Для этой сборки не задан публичный репозиторий обновлений. Новую версию можно скачать в GitHub Releases.",
+                        );
                       else if (update.available) {
                         await api().installUpdate();
                       } else onMessage("Установлена последняя версия");

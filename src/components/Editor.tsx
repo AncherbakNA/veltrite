@@ -15,7 +15,7 @@ const colors = HighlightStyle.define([
   { tag: tags.heading2, fontSize: "1.35em" },
   { tag: tags.strong, fontWeight: "700", color: "var(--text)" },
   { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: [tags.link, tags.url], color: "var(--accent)" },
+  { tag: [tags.link, tags.url], color: "var(--accent-ink)" },
   { tag: tags.monospace, color: "var(--green)", fontFamily: "var(--mono)" },
   { tag: tags.meta, color: "var(--muted)" },
   { tag: tags.quote, color: "var(--muted)" },

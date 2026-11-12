@@ -650,7 +650,7 @@ async function createWindow() {
     icon: app.isPackaged
       ? path.join(process.resourcesPath, "icon.png")
       : path.join(__dirname, "../resources/icon.png"),
-    backgroundColor: "#17171c",
+    backgroundColor: "#161b24",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     trafficLightPosition: { x: 18, y: 18 },
     webPreferences: {

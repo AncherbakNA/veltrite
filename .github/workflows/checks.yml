@@ -27,5 +27,14 @@ jobs:
       - name: Проверить файлы и синхронизацию
         run: pnpm test
       - name: Проверить настольный интерфейс
-        if: runner.os == 'macOS'
         run: pnpm test:e2e
+      - name: Сохранить отчёт при ошибке
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Ошибка-${{ matrix.os }}
+          path: |
+            ../Veltrite-local/playwright-report
+            ../Veltrite-local/test-results
+          retention-days: 7
+          if-no-files-found: ignore

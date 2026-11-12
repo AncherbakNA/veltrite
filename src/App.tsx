@@ -1,30 +1,14 @@
 import {
-  ArrowUpRight,
-  BookOpen,
-  CalendarDays,
   Check,
-  ChevronLeft,
-  ChevronRight,
   Clock3,
-  Code2,
-  Columns2,
-  Command as CommandIcon,
-  Ellipsis,
-  Files,
   FileText,
   FolderOpen,
   GitBranch,
-  Mic,
+  House,
   PanelRightClose,
   PanelRightOpen,
   PanelsTopLeft,
-  PenLine,
   Plus,
-  RefreshCw,
-  Search,
-  Settings as SettingsIcon,
-  Square,
-  Star,
   Table2,
   X,
 } from "lucide-react";
@@ -34,6 +18,8 @@ import { frontmatter, indexNote, resolveLink } from "../shared/markdown";
 import type { HistoryItem, PluginInfo, Preferences } from "../shared/types";
 import { VaultFilesContext } from "./VaultContext";
 import { buildCommands } from "./commands";
+import AppHeader from "./components/AppHeader";
+import BrandMark from "./components/BrandMark";
 import {
   CommandPalette,
   Dialog,
@@ -41,10 +27,13 @@ import {
   type DialogData,
 } from "./components/Dialog";
 import DocumentBoundary from "./components/DocumentBoundary";
+import DocumentToolbar from "./components/DocumentToolbar";
+import FileCollection from "./components/FileCollection";
 import Inspector from "./components/Inspector";
 import Markdown from "./components/Markdown";
-import Sidebar from "./components/Sidebar";
+import Sidebar, { type FileFilter } from "./components/Sidebar";
 import Welcome from "./components/Welcome";
+import WorkspaceHome from "./components/WorkspaceHome";
 import { api, useVault } from "./useVault";
 const Editor = lazy(() => import("./components/Editor"));
 const Canvas = lazy(() => import("./components/Canvas"));
@@ -73,8 +62,12 @@ export default function App() {
   const [section, setSection] = useState("files"),
     [mode, setMode] = useState<Mode>("live"),
     [graph, setGraph] = useState(false),
-    [right, setRight] = useState(true),
+    [home, setHome] = useState(false),
+    [fileFilter, setFileFilter] = useState<FileFilter>("all"),
+    [collection, setCollection] = useState<FileFilter | null>(null),
+    [right, setRight] = useState(window.innerWidth >= 1180),
     [settings, setSettings] = useState(false),
+    [settingsTab, setSettingsTab] = useState("appearance"),
     [palette, setPalette] = useState<{
       commands: Command[];
       placeholder?: string;
@@ -105,16 +98,21 @@ export default function App() {
   );
   useEffect(() => {
     if (!preferences) return;
-    const dark =
-      preferences.theme === "dark" ||
-      (preferences.theme === "system" &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    const system = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      const dark =
+        preferences.theme === "dark" ||
+        (preferences.theme === "system" && system.matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    };
+    applyTheme();
+    system.addEventListener("change", applyTheme);
     document.documentElement.style.setProperty(
       "--editor-size",
       preferences.fontSize + "px",
     );
     document.documentElement.style.setProperty("--accent", preferences.accent);
+    return () => system.removeEventListener("change", applyTheme);
   }, [preferences]);
   useEffect(() => api().onMenu((action) => actionRef.current(action)), []);
   useEffect(() => {
@@ -158,6 +156,8 @@ export default function App() {
         }
         await workspace.open(path);
         setGraph(false);
+        setHome(false);
+        setCollection(null);
         if (openHistory.current[historyPosition.current] !== path) {
           openHistory.current = openHistory.current.slice(0, historyPosition.current + 1);
           openHistory.current.push(path);
@@ -245,6 +245,7 @@ export default function App() {
   const sync = () =>
     run(async () => {
       if (!state?.sync.configured) {
+        setSettingsTab("sync");
         setSettings(true);
         return;
       }
@@ -402,7 +403,11 @@ export default function App() {
     newFile,
     quickOpen,
     daily,
-    setGraph,
+    setGraph: (value) => {
+      setHome(false);
+      setCollection(null);
+      setGraph(value);
+    },
     setSection,
     index,
     open,
@@ -452,6 +457,17 @@ export default function App() {
       .catch(() => {});
   }, [settings]);
   actionRef.current = (action: string) => {
+    if (action === "home") {
+      setHome(true);
+      setCollection(null);
+      setGraph(false);
+      return;
+    }
+    if (action === "settings") {
+      setSettingsTab("appearance");
+      setSettings(true);
+      return;
+    }
     if (action === "commands") {
       setPalette({ commands: [...commands, ...pluginCommands] });
       return;
@@ -517,10 +533,26 @@ export default function App() {
         body,
     );
   };
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1179px)");
+    const collapse = () => {
+      if (media.matches) setRight(false);
+    };
+    media.addEventListener("change", collapse);
+    return () => media.removeEventListener("change", collapse);
+  }, []);
+  useEffect(() => {
+    setHome(false);
+    setGraph(false);
+    setCollection(null);
+    setFileFilter("all");
+    setSection("files");
+    setRecentOpen(false);
+  }, [vault?.root]);
   if (!state)
     return (
       <div className="loading-screen">
-        <div className="logo-mark">V</div>
+        <BrandMark size={46} />
         <span>Veltrite</span>
       </div>
     );
@@ -529,17 +561,14 @@ export default function App() {
       value={vault?.files.filter((f) => f.kind !== "folder").map((f) => f.path) || []}
     >
       <div className="app-shell">
-        <header className="titlebar">
-          <div className="titlebar-drag">
-            <span className="titlebar-brand">Veltrite</span>
-            <ChevronRight size={12} />
-            <span>{vault?.name || "Ваше пространство для мыслей"}</span>
-          </div>
-          <div className="titlebar-right">
-            <span className="local-indicator" />
-            <span>{vault ? "Локальные файлы" : "Markdown · Canvas · GitHub"}</span>
-          </div>
-        </header>
+        <AppHeader
+          vaultName={vault?.name}
+          sync={state.sync}
+          busy={syncing}
+          onSearch={quickOpen}
+          onCommands={() => actionRef.current("commands")}
+          onSync={sync}
+        />
         {!vault ? (
           <Welcome
             recent={state.recent}
@@ -553,71 +582,8 @@ export default function App() {
         ) : (
           <>
             <div className="main-layout">
-              <nav className="ribbon">
-                <button
-                  title="Файлы"
-                  aria-label="Файлы"
-                  className={section === "files" ? "active" : ""}
-                  onClick={() => setSection("files")}
-                >
-                  <Files size={21} />
-                </button>
-                <button
-                  title="Поиск"
-                  aria-label="Поиск"
-                  onClick={() => setSection("search")}
-                >
-                  <Search size={21} />
-                </button>
-                <button
-                  title="Граф знаний"
-                  aria-label="Граф знаний"
-                  className={graph ? "active" : ""}
-                  onClick={() => setGraph((v) => !v)}
-                >
-                  <GitBranch size={21} />
-                </button>
-                <button
-                  title="Новый холст"
-                  aria-label="Новый холст"
-                  onClick={() => newFile("canvas")}
-                >
-                  <PanelsTopLeft size={21} />
-                </button>
-                <button title="Ежедневная заметка" onClick={daily}>
-                  <CalendarDays size={21} />
-                </button>
-                <button
-                  title="Палитра команд"
-                  onClick={() => actionRef.current("commands")}
-                >
-                  <CommandIcon size={21} />
-                </button>
-                <div className="ribbon-spacer" />
-                <button
-                  title={recording ? "Остановить запись" : "Записать аудио"}
-                  className={recording ? "recording" : ""}
-                  onClick={record}
-                >
-                  {recording ? <Square size={19} /> : <Mic size={20} />}
-                </button>
-                <button
-                  title="Синхронизировать"
-                  aria-label="Синхронизировать"
-                  className={syncing ? "spinning" : ""}
-                  onClick={sync}
-                >
-                  <RefreshCw size={20} />
-                </button>
-                <button
-                  title="Настройки"
-                  aria-label="Настройки"
-                  onClick={() => setSettings(true)}
-                >
-                  <SettingsIcon size={21} />
-                </button>
-              </nav>
               <Sidebar
+                key={vault.root}
                 vault={vault}
                 index={index}
                 active={active}
@@ -626,6 +592,21 @@ export default function App() {
                 onFileAction={fileAction}
                 section={section}
                 setSection={setSection}
+                view={
+                  graph
+                    ? "graph"
+                    : collection
+                      ? "collection"
+                      : home || !current
+                        ? "home"
+                        : "document"
+                }
+                filter={fileFilter}
+                setFilter={(filter) => {
+                  setFileFilter(filter);
+                  if (collection) setCollection(filter);
+                }}
+                recording={recording}
               />
               {recentOpen && (
                 <div className="vault-menu">
@@ -657,19 +638,40 @@ export default function App() {
               )}
               <main className="workspace">
                 <div className="tabbar">
-                  <div className="tabs">
+                  <button
+                    className={
+                      "home-tab " +
+                      (!graph && !collection && (home || !current) ? "active" : "")
+                    }
+                    title="Начальная страница"
+                    aria-label="Начальная страница"
+                    onClick={() => actionRef.current("home")}
+                  >
+                    <House size={16} />
+                  </button>
+                  <div className="tabs" role="tablist" aria-label="Открытые файлы">
                     {tabs.map((tab) => (
                       <div
                         className={
-                          "tab " + (tab.path === active && !graph ? "active" : "")
+                          "tab " +
+                          (tab.path === active && !graph && !home && !collection
+                            ? "active"
+                            : "")
                         }
                         key={tab.path}
                       >
                         <button
                           className="tab-open"
+                          role="tab"
+                          aria-selected={
+                            tab.path === active && !graph && !home && !collection
+                          }
+                          title={tab.path}
                           onClick={() => {
                             workspace.setActive(tab.path);
                             setGraph(false);
+                            setHome(false);
+                            setCollection(null);
                           }}
                         >
                           {tab.path.toLowerCase().endsWith(".canvas") ? (
@@ -705,15 +707,18 @@ export default function App() {
                     </button>
                   </div>
                   <button
-                    className="icon-button"
+                    className={"panel-toggle " + (right ? "active" : "")}
+                    disabled={!current || home || graph || !!collection}
+                    aria-expanded={right && !!current && !home && !graph && !collection}
                     title={right ? "Скрыть боковую панель" : "Показать боковую панель"}
                     onClick={() => setRight((v) => !v)}
                   >
                     {right ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
+                    <span>Панель</span>
                   </button>
                 </div>
                 <DocumentBoundary
-                  key={(current?.path || "") + mode + graph}
+                  key={(current?.path || "") + mode + graph + home + collection}
                   onSource={() => {
                     setGraph(false);
                     setMode("source");
@@ -724,117 +729,54 @@ export default function App() {
                   >
                     {graph ? (
                       <Graph index={index} active={active} onOpen={open} />
-                    ) : current ? (
+                    ) : collection ? (
+                      <FileCollection
+                        key={collection}
+                        kind={collection}
+                        files={vault.files}
+                        index={index}
+                        onOpen={open}
+                        onHome={() => actionRef.current("home")}
+                        onCreate={(action) => actionRef.current(action)}
+                      />
+                    ) : current && !home ? (
                       <>
-                        <div className="document-toolbar">
-                          <div className="breadcrumb">
-                            <button
-                              className="icon-button"
-                              title="Назад"
-                              onClick={() => {
-                                if (historyPosition.current > 0) {
-                                  historyPosition.current--;
-                                  workspace.open(
-                                    openHistory.current[historyPosition.current],
-                                  );
-                                }
-                              }}
-                            >
-                              <ChevronLeft size={15} />
-                            </button>
-                            {current.path.split("/").map((part, i, all) => (
-                              <span key={i}>
-                                {part.replace(/\.(md|canvas|base)$/i, "")}
-                                {i < all.length - 1 && <ChevronRight size={12} />}
-                              </span>
-                            ))}
-                          </div>
-                          <div className="document-tools">
-                            {!current.path.toLowerCase().endsWith(".canvas") && (
-                              <div className="view-toggle">
-                                <button
-                                  title="Редактор"
-                                  aria-label="Редактор"
-                                  className={mode === "live" ? "active" : ""}
-                                  onClick={() => setMode("live")}
-                                >
-                                  <PenLine size={15} />
-                                </button>
-                                <button
-                                  title="Исходный код"
-                                  aria-label="Исходный код"
-                                  className={mode === "source" ? "active" : ""}
-                                  onClick={() => setMode("source")}
-                                >
-                                  <Code2 size={17} />
-                                </button>
-                                <button
-                                  title="Чтение"
-                                  aria-label="Чтение"
-                                  className={mode === "read" ? "active" : ""}
-                                  onClick={() => setMode("read")}
-                                >
-                                  <BookOpen size={16} />
-                                </button>
-                                <button
-                                  title="Редактор и предпросмотр"
-                                  aria-label="Редактор и предпросмотр"
-                                  className={mode === "split" ? "active" : ""}
-                                  onClick={() => setMode("split")}
-                                >
-                                  <Columns2 size={16} />
-                                </button>
-                              </div>
-                            )}
-                            {current.path.toLowerCase().endsWith(".canvas") && (
-                              <button
-                                className="icon-button"
-                                title="Исходный код холста"
-                                onClick={() =>
-                                  setMode((m) => (m === "source" ? "live" : "source"))
-                                }
-                              >
-                                <Code2 size={17} />
-                              </button>
-                            )}
-                            <button
-                              className={
-                                "icon-button " +
-                                (preferences!.bookmarks.includes(current.path)
-                                  ? "starred"
-                                  : "")
-                              }
-                              title="Закладка"
-                              onClick={bookmark}
-                            >
-                              <Star size={16} />
-                            </button>
-                            <button
-                              className="icon-button"
-                              title="Действия с заметкой"
-                              onClick={() =>
-                                setPalette({
-                                  commands: commands.filter((c) =>
-                                    [
-                                      "history",
-                                      "html",
-                                      "pdf",
-                                      "slides",
-                                      "compose",
-                                      "extract",
-                                      "attachment",
-                                      "template",
-                                      "bookmark",
-                                      "reveal",
-                                    ].includes(c.id),
-                                  ),
-                                })
-                              }
-                            >
-                              <Ellipsis size={19} />
-                            </button>
-                          </div>
-                        </div>
+                        <DocumentToolbar
+                          path={current.path}
+                          mode={mode}
+                          setMode={setMode}
+                          canGoBack={historyPosition.current > 0}
+                          onBack={() => {
+                            if (historyPosition.current > 0) {
+                              historyPosition.current--;
+                              run(() =>
+                                workspace.open(
+                                  openHistory.current[historyPosition.current],
+                                ),
+                              );
+                            }
+                          }}
+                          bookmarked={preferences!.bookmarks.includes(current.path)}
+                          onBookmark={bookmark}
+                          onActions={() =>
+                            setPalette({
+                              commands: commands.filter((command) =>
+                                [
+                                  "history",
+                                  "html",
+                                  "pdf",
+                                  "slides",
+                                  "compose",
+                                  "extract",
+                                  "attachment",
+                                  "template",
+                                  "bookmark",
+                                  "reveal",
+                                ].includes(command.id),
+                              ),
+                            })
+                          }
+                        />
                         {current.error && (
                           <div className="save-error">
                             <span>{current.error}</span>
@@ -968,40 +910,24 @@ export default function App() {
                         )}
                       </>
                     ) : (
-                      <div className="workspace-empty">
-                        <div className="empty-glyph">V</div>
-                        <span className="eyebrow">МЫСЛИ СТАНОВЯТСЯ СВЯЗЯМИ</span>
-                        <h1>С чего начнём?</h1>
-                        <p>Откройте заметку слева или создайте что-нибудь новое.</p>
-                        <div className="empty-actions">
-                          <button onClick={() => newFile("note")}>
-                            <FileText size={19} />
-                            <span>
-                              Новая заметка<small>⌘/Ctrl + N</small>
-                            </span>
-                            <ArrowUpRight size={16} />
-                          </button>
-                          <button onClick={() => newFile("canvas")}>
-                            <PanelsTopLeft size={19} />
-                            <span>
-                              Новый холст<small>Пространство для идей</small>
-                            </span>
-                            <ArrowUpRight size={16} />
-                          </button>
-                          <button onClick={quickOpen}>
-                            <Search size={19} />
-                            <span>
-                              Быстрый переход<small>⌘/Ctrl + O</small>
-                            </span>
-                            <ArrowUpRight size={16} />
-                          </button>
-                        </div>
-                      </div>
+                      <WorkspaceHome
+                        vault={vault}
+                        index={index}
+                        recentPaths={tabs.map((tab) => tab.path)}
+                        onOpen={open}
+                        onAction={(action) => actionRef.current(action)}
+                        onFilter={(filter) => {
+                          setFileFilter(filter);
+                          setCollection(filter);
+                          setHome(false);
+                          setSection("files");
+                        }}
+                      />
                     )}
                   </Suspense>
                 </DocumentBoundary>
               </main>
-              {right && (
+              {right && current && !home && !graph && !collection && (
                 <Inspector
                   currentIndex={currentIndex}
                   currentPath={current?.path || null}
@@ -1014,15 +940,26 @@ export default function App() {
                   setSection={setSection}
                   setProperty={setProperty}
                   setDialog={setDialog}
+                  onClose={() => setRight(false)}
                 />
               )}
             </div>
             <footer className="statusbar">
-              <div>
+              <div
+                className={
+                  "save-state " +
+                  (tabs.some((tab) => tab.error)
+                    ? "has-error"
+                    : tabs.some((tab) => tab.dirty)
+                      ? "is-pending"
+                      : "")
+                }
+                aria-live="polite"
+              >
                 <span className="status-dot" />
-                {current?.error
+                {tabs.some((tab) => tab.error)
                   ? "Ошибка сохранения"
-                  : current?.dirty
+                  : tabs.some((tab) => tab.dirty)
                     ? "Сохранение…"
                     : "Все изменения сохранены"}
                 {recording && <span className="recording-text">● Идёт запись</span>}
@@ -1042,10 +979,12 @@ export default function App() {
                         ? "GitHub подключён"
                         : "Локальное хранилище"}
                 </button>
-                <span>{currentIndex?.words || 0} слов</span>
-                <span>{current?.content.length || 0} символов</span>
-                <span>UTF-8</span>
-                <span>Veltrite</span>
+                {current && !home && !graph && !collection && (
+                  <>
+                    <span>{currentIndex?.words || 0} слов</span>
+                    <span>{current.content.length} символов</span>
+                  </>
+                )}
               </div>
             </footer>
           </>
@@ -1054,6 +993,7 @@ export default function App() {
           <Suspense fallback={null}>
             <Settings
               preferences={preferences}
+              initialTab={settingsTab}
               sync={state.sync}
               onPreferences={updatePreferences}
               onSync={workspace.updateSync}
