@@ -22,6 +22,7 @@ export function evaluateExpression(
     syntaxCache.set(source, syntax);
   }
   let visited = 0;
+  const bindings: Record<string, Value>[] = [];
   const get = (object: any, key: string): Value => {
     if (forbidden.has(key)) throw Error("Запрещённое свойство");
     if (object instanceof Date) {
@@ -128,11 +129,14 @@ export function evaluateExpression(
     throw Error("Неподдерживаемая функция: " + name);
   };
   const visit = (node: SyntaxNode, depth = 0): Value => {
-    if (!node || depth > 48 || ++visited > 2000) throw Error("Слишком сложное выражение");
+    if (!node || depth > 48 || ++visited > 20000)
+      throw Error("Слишком сложное выражение");
     const next = (child: SyntaxNode) => visit(child, depth + 1);
     if (node.type === "Literal") return node.value;
     if (node.type === "Identifier") {
       if (forbidden.has(node.name)) throw Error("Запрещённое имя");
+      const local = bindings.findLast((scope) => Object.hasOwn(scope, node.name));
+      if (local) return local[node.name];
       return Object.hasOwn(variables, node.name)
         ? variables[node.name]
         : get(variables.note, node.name);
@@ -176,7 +180,9 @@ export function evaluateExpression(
         case "<=":
           return left <= right;
         case "+":
-          return left + right;
+          return left instanceof Date && typeof right === "number"
+            ? new Date(+left + right)
+            : left + right;
         case "-":
           return Number(left) - Number(right);
         case "*":
@@ -204,6 +210,14 @@ export function evaluateExpression(
         if (name === "list") return Array.isArray(args[0]) ? args[0] : [args[0]];
         if (name === "min") return Math.min(...args.map(Number));
         if (name === "max") return Math.max(...args.map(Number));
+        if (name === "duration") {
+          const match = /^(-?\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)$/.exec(String(args[0]));
+          if (!match) throw Error("Длительность: число и ms, s, m, h, d или w");
+          return (
+            Number(match[1]) *
+            { ms: 1, s: 1000, m: 60000, h: 3600000, d: 86400000, w: 604800000 }[match[2]]!
+          );
+        }
         if (name === "now") return new Date();
         if (name === "today") {
           const date = new Date();
@@ -218,14 +232,29 @@ export function evaluateExpression(
           return args[1] ?? args[0];
         throw Error("Неподдерживаемая функция: " + name);
       }
-      if (node.callee.type === "MemberExpression")
-        return call(
-          next(node.callee.object),
-          node.callee.computed
+      if (node.callee.type === "MemberExpression") {
+        const object = next(node.callee.object),
+          name = node.callee.computed
             ? String(next(node.callee.property))
-            : node.callee.property.name,
-          node.arguments.map(next),
-        );
+            : node.callee.property.name;
+        if (Array.isArray(object) && ["map", "filter", "every", "some"].includes(name)) {
+          if (object.length > 10000 || node.arguments.length !== 1)
+            throw Error("Слишком сложная операция со списком");
+          const evaluateItem = (value: unknown, index: number) => {
+            bindings.push({ value, index });
+            try {
+              return next(node.arguments[0]);
+            } finally {
+              bindings.pop();
+            }
+          };
+          if (name === "map") return object.map(evaluateItem);
+          if (name === "filter") return object.filter(evaluateItem);
+          if (name === "every") return object.every(evaluateItem);
+          return object.some(evaluateItem);
+        }
+        return call(object, name, node.arguments.map(next));
+      }
     }
     throw Error("Неподдерживаемый синтаксис Bases");
   };

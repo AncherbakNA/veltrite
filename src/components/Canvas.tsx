@@ -13,12 +13,16 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { canvasVisibility, viewport } from "../../shared/canvas-viewport";
 import { plural } from "../../shared/format";
 import { validateCanvas } from "../../shared/markdown";
+import { noteFragment } from "../../shared/markdown-blocks";
 import type { CanvasData, CanvasNode, NoteIndex } from "../../shared/types";
 import { fileTitle } from "../ui";
 import { api } from "../useVault";
+import CanvasOverview from "./CanvasOverview";
 import Markdown, { assetUrl } from "./Markdown";
+import WebCard from "./WebCard";
 const palette: Record<string, string> = {
   "1": "#e27b84",
   "2": "#dea26f",
@@ -34,10 +38,12 @@ function color(value?: string) {
 }
 function FileCard({
   file,
+  subpath,
   index,
   onOpen,
 }: {
   file: string;
+  subpath?: string;
   index: NoteIndex[];
   onOpen: (p: string) => void;
 }) {
@@ -52,7 +58,16 @@ function FileCard({
   if (/\.(png|jpe?g|webp|gif|avif)$/i.test(file))
     return <img src={assetUrl(file)} alt={file} draggable={false} />;
   if (file.toLowerCase().endsWith(".md"))
-    return <Markdown content={text} path={file} index={index} onLink={onOpen} />;
+    return (
+      <Markdown
+        content={
+          subpath ? (noteFragment(text, file + subpath) ?? "Фрагмент не найден") : text
+        }
+        path={file}
+        index={index}
+        onLink={onOpen}
+      />
+    );
   return <button onClick={() => onOpen(file)}>Открыть {file}</button>;
 }
 export default function Canvas({
@@ -83,6 +98,16 @@ export default function Canvas({
     contentRef = useRef(content);
   const [transform, setTransform] = useState({ x: 80, y: 70, scale: 1 }),
     transformRef = useRef(transform);
+  const [size, setSize] = useState({ width: 900, height: 600 });
+  useEffect(() => {
+    if (!host.current) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0].contentRect;
+      setSize({ width: rect.width, height: rect.height });
+    });
+    observer.observe(host.current);
+    return () => observer.disconnect();
+  }, []);
   const [selected, setSelected] = useState<string[]>([]),
     [connect, setConnect] = useState(false),
     [panMode, setPanMode] = useState(false);
@@ -104,6 +129,17 @@ export default function Canvas({
     contentRef.current = text;
     onChange(text);
   };
+  const zoom = (factor: number) =>
+    setTransform((t) => {
+      const scale = Math.min(2.5, Math.max(0.015, t.scale * factor)),
+        x = size.width / 2,
+        y = size.height / 2;
+      return {
+        scale,
+        x: x - ((x - t.x) * scale) / t.scale,
+        y: y - ((y - t.y) * scale) / t.scale,
+      };
+    });
   const fit = () => {
     const nodes = dataRef.current.nodes;
     if (!nodes.length) {
@@ -119,7 +155,7 @@ export default function Canvas({
     const scale = Math.min(
       1.2,
       Math.max(
-        0.12,
+        0.015,
         Math.min((width - 120) / (right - left), (height - 150) / (bottom - top)),
       ),
     );
@@ -143,7 +179,7 @@ export default function Canvas({
         const rect = element.getBoundingClientRect(),
           x = e.clientX - rect.left,
           y = e.clientY - rect.top,
-          scale = Math.min(2.5, Math.max(0.12, t.scale * Math.exp(-e.deltaY * 0.007)));
+          scale = Math.min(2.5, Math.max(0.015, t.scale * Math.exp(-e.deltaY * 0.007)));
         setTransform({
           x: x - ((x - t.x) * scale) / t.scale,
           y: y - ((y - t.y) * scale) / t.scale,
@@ -221,6 +257,16 @@ export default function Canvas({
         : side === "left"
           ? { x: node.x, y: node.y + node.height / 2 }
           : { x: node.x + node.width, y: node.y + node.height / 2 };
+  const overview = data.nodes.length > 300 && transform.scale < 0.22;
+  const visible = useMemo(
+    () =>
+      canvasVisibility(
+        data,
+        viewport(transform, size.width, size.height),
+        new Set(selected),
+      ),
+    [data, transform, size, selected],
+  );
   return (
     <div
       className={"canvas-view " + (panMode ? "pan-mode" : "")}
@@ -259,7 +305,12 @@ export default function Canvas({
         }
       }}
       onPointerDown={(e) => {
-        if (e.target === e.currentTarget || panMode || e.button === 1) {
+        if (
+          e.target === e.currentTarget ||
+          (e.target as HTMLElement).classList.contains("canvas-overview") ||
+          panMode ||
+          e.button === 1
+        ) {
           e.preventDefault();
           host.current?.focus();
           if (!e.shiftKey) setSelected([]);
@@ -450,233 +501,240 @@ export default function Canvas({
           </p>
         </div>
       )}
-      <div
-        className="canvas-world"
-        style={{
-          transform: `translate(${transform.x}px,${transform.y}px) scale(${transform.scale})`,
-        }}
-      >
-        <svg className="canvas-edges">
-          <defs>
-            <marker
-              id="arrow"
-              viewBox="0 0 10 10"
-              refX="9"
-              refY="5"
-              markerWidth="7"
-              markerHeight="7"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
-            </marker>
-          </defs>
-          {data.edges.map((edge) => {
-            const from = data.nodes.find((n) => n.id === edge.fromNode),
-              to = data.nodes.find((n) => n.id === edge.toNode);
-            if (!from || !to) return null;
-            const a = point(from, edge.fromSide),
-              b = point(to, edge.toSide || "left"),
-              bend = Math.max(60, Math.abs(a.x - b.x) * 0.5);
-            return (
-              <g
-                key={edge.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelected([edge.id]);
-                }}
+      {overview && (
+        <CanvasOverview
+          data={data}
+          transform={transform}
+          width={size.width}
+          height={size.height}
+          onTransform={setTransform}
+          onActivate={(node) => {
+            setSelected([node.id]);
+            setTransform({
+              scale: 0.8,
+              x: size.width / 2 - (node.x + node.width / 2) * 0.8,
+              y: size.height / 2 - (node.y + node.height / 2) * 0.8,
+            });
+          }}
+        />
+      )}
+      {!overview && (
+        <div
+          className="canvas-world"
+          style={{
+            transform: `translate(${transform.x}px,${transform.y}px) scale(${transform.scale})`,
+          }}
+        >
+          <svg className="canvas-edges">
+            <defs>
+              <marker
+                id="arrow"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
               >
-                <path
-                  className={"edge " + (selected.includes(edge.id) ? "selected" : "")}
-                  d={`M ${a.x} ${a.y} C ${a.x + bend} ${a.y}, ${b.x - bend} ${b.y}, ${b.x} ${b.y}`}
-                  stroke={color(edge.color)}
-                  markerEnd={edge.toEnd === "none" ? undefined : "url(#arrow)"}
-                  markerStart={edge.fromEnd === "arrow" ? "url(#arrow)" : undefined}
-                />
-                {edge.label && (
-                  <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 10} textAnchor="middle">
-                    {edge.label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-        {data.nodes.map((node) => (
-          <div
-            key={node.id}
-            className={
-              "canvas-node " + node.type + (selected.includes(node.id) ? " selected" : "")
-            }
-            style={
-              {
-                left: node.x,
-                top: node.y,
-                width: node.width,
-                height: node.height,
-                "--node-color": color(node.color),
-              } as React.CSSProperties
-            }
-            onClick={(e) => {
-              e.stopPropagation();
-              if (connect) {
-                if (selected.length === 1 && selected[0] !== node.id) {
-                  commit({
-                    ...data,
-                    edges: [
-                      ...data.edges,
-                      {
-                        id: crypto.randomUUID(),
-                        fromNode: selected[0],
-                        toNode: node.id,
-                        fromSide: "right",
-                        toSide: "left",
-                      },
-                    ],
-                  });
-                  setConnect(false);
-                  setSelected([]);
-                } else setSelected([node.id]);
-              } else if (e.shiftKey)
-                setSelected((old) =>
-                  old.includes(node.id)
-                    ? old.filter((id) => id !== node.id)
-                    : [...old, node.id],
-                );
-              else setSelected([node.id]);
-            }}
-          >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
+              </marker>
+            </defs>
+            {visible.edges.map((edge) => {
+              const from = visible.byId.get(edge.fromNode),
+                to = visible.byId.get(edge.toNode);
+              if (!from || !to) return null;
+              const a = point(from, edge.fromSide),
+                b = point(to, edge.toSide || "left"),
+                bend = Math.max(60, Math.abs(a.x - b.x) * 0.5);
+              return (
+                <g
+                  key={edge.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelected([edge.id]);
+                  }}
+                >
+                  <path
+                    className={"edge " + (selected.includes(edge.id) ? "selected" : "")}
+                    d={`M ${a.x} ${a.y} C ${a.x + bend} ${a.y}, ${b.x - bend} ${b.y}, ${b.x} ${b.y}`}
+                    stroke={color(edge.color)}
+                    markerEnd={edge.toEnd === "none" ? undefined : "url(#arrow)"}
+                    markerStart={edge.fromEnd === "arrow" ? "url(#arrow)" : undefined}
+                  />
+                  {edge.label && (
+                    <text
+                      x={(a.x + b.x) / 2}
+                      y={(a.y + b.y) / 2 - 10}
+                      textAnchor="middle"
+                    >
+                      {edge.label}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+          {visible.nodes.map((node) => (
             <div
-              className="canvas-node-header"
-              onPointerDown={(e) => {
-                if (connect) return;
-                e.stopPropagation();
-                host.current?.focus();
-                e.currentTarget.setPointerCapture(e.pointerId);
-                const ids = selected.includes(node.id) ? selected : [node.id];
-                setSelected(ids);
-                const included = data.nodes.filter(
-                  (n) =>
-                    ids.includes(n.id) ||
-                    (node.type === "group" &&
-                      n.x >= node.x &&
-                      n.y >= node.y &&
-                      n.x + n.width <= node.x + node.width &&
-                      n.y + n.height <= node.y + node.height),
-                );
-                undo.current.push(contentRef.current);
-                redo.current = [];
-                drag.current = {
-                  kind: "node",
-                  x: e.clientX,
-                  y: e.clientY,
-                  original: Object.fromEntries(
-                    included.map((n) => [n.id, { x: n.x, y: n.y }]),
-                  ),
-                };
-              }}
-            >
-              <span>
-                {node.type === "file" ? (
-                  fileTitle(node.file)
-                ) : (
-                  <GripHorizontal size={16} className="canvas-grip" />
-                )}
-              </span>
-              {node.type === "file" && (
-                <button title="Открыть файл" onClick={() => onOpen(node.file)}>
-                  <FileText size={16} />
-                </button>
-              )}
-            </div>
-            {node.type === "text" && (
-              <textarea
-                aria-label="Текст карточки"
-                placeholder="Текст карточки…"
-                value={node.text}
-                onPointerDown={(e) => e.stopPropagation()}
-                onChange={(e) =>
-                  commit({
-                    ...data,
-                    nodes: data.nodes.map((n) =>
-                      n.id === node.id ? { ...n, text: e.target.value } : n,
-                    ),
-                  })
-                }
-              />
-            )}
-            {node.type === "file" && (
-              <div className="canvas-file-content">
-                <FileCard file={node.file} index={index} onOpen={onOpen} />
-              </div>
-            )}
-            {node.type === "link" && (
-              <button
-                className="canvas-link"
-                onClick={() => api().openExternal(node.url)}
-              >
-                {node.url}
-              </button>
-            )}
-            {node.type === "group" && (
-              <input
-                aria-label="Название группы"
-                className="group-label"
-                value={node.label || ""}
-                onChange={(e) =>
-                  commit({
-                    ...data,
-                    nodes: data.nodes.map((n) =>
-                      n.id === node.id ? { ...n, label: e.target.value } : n,
-                    ),
-                  })
-                }
-              />
-            )}
-            <div
-              className="canvas-resize"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                e.currentTarget.setPointerCapture(e.pointerId);
-                undo.current.push(contentRef.current);
-                drag.current = {
-                  kind: "resize",
-                  id: node.id,
-                  x: e.clientX,
-                  y: e.clientY,
+              key={node.id}
+              className={
+                "canvas-node " +
+                node.type +
+                (selected.includes(node.id) ? " selected" : "")
+              }
+              style={
+                {
+                  left: node.x,
+                  top: node.y,
                   width: node.width,
                   height: node.height,
-                };
+                  "--node-color": color(node.color),
+                } as React.CSSProperties
+              }
+              onClick={(e) => {
+                e.stopPropagation();
+                if (connect) {
+                  if (selected.length === 1 && selected[0] !== node.id) {
+                    commit({
+                      ...data,
+                      edges: [
+                        ...data.edges,
+                        {
+                          id: crypto.randomUUID(),
+                          fromNode: selected[0],
+                          toNode: node.id,
+                          fromSide: "right",
+                          toSide: "left",
+                        },
+                      ],
+                    });
+                    setConnect(false);
+                    setSelected([]);
+                  } else setSelected([node.id]);
+                } else if (e.shiftKey)
+                  setSelected((old) =>
+                    old.includes(node.id)
+                      ? old.filter((id) => id !== node.id)
+                      : [...old, node.id],
+                  );
+                else setSelected([node.id]);
               }}
-            />
-          </div>
-        ))}
-      </div>
+            >
+              <div
+                className="canvas-node-header"
+                onPointerDown={(e) => {
+                  if (connect) return;
+                  e.stopPropagation();
+                  host.current?.focus();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  const ids = selected.includes(node.id) ? selected : [node.id];
+                  setSelected(ids);
+                  const included = data.nodes.filter(
+                    (n) =>
+                      ids.includes(n.id) ||
+                      (node.type === "group" &&
+                        n.x >= node.x &&
+                        n.y >= node.y &&
+                        n.x + n.width <= node.x + node.width &&
+                        n.y + n.height <= node.y + node.height),
+                  );
+                  undo.current.push(contentRef.current);
+                  redo.current = [];
+                  drag.current = {
+                    kind: "node",
+                    x: e.clientX,
+                    y: e.clientY,
+                    original: Object.fromEntries(
+                      included.map((n) => [n.id, { x: n.x, y: n.y }]),
+                    ),
+                  };
+                }}
+              >
+                <span>
+                  {node.type === "file" ? (
+                    fileTitle(node.file)
+                  ) : (
+                    <GripHorizontal size={16} className="canvas-grip" />
+                  )}
+                </span>
+                {node.type === "file" && (
+                  <button title="Открыть файл" onClick={() => onOpen(node.file)}>
+                    <FileText size={16} />
+                  </button>
+                )}
+              </div>
+              {node.type === "text" && (
+                <textarea
+                  aria-label="Текст карточки"
+                  placeholder="Текст карточки…"
+                  value={node.text}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onChange={(e) =>
+                    commit({
+                      ...data,
+                      nodes: data.nodes.map((n) =>
+                        n.id === node.id ? { ...n, text: e.target.value } : n,
+                      ),
+                    })
+                  }
+                />
+              )}
+              {node.type === "file" && (
+                <div className="canvas-file-content">
+                  <FileCard
+                    file={node.file}
+                    subpath={node.subpath}
+                    index={index}
+                    onOpen={onOpen}
+                  />
+                </div>
+              )}
+              {node.type === "link" && <WebCard url={node.url} />}
+              {node.type === "group" && (
+                <input
+                  aria-label="Название группы"
+                  className="group-label"
+                  value={node.label || ""}
+                  onChange={(e) =>
+                    commit({
+                      ...data,
+                      nodes: data.nodes.map((n) =>
+                        n.id === node.id ? { ...n, label: e.target.value } : n,
+                      ),
+                    })
+                  }
+                />
+              )}
+              <div
+                className="canvas-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  undo.current.push(contentRef.current);
+                  drag.current = {
+                    kind: "resize",
+                    id: node.id,
+                    x: e.clientX,
+                    y: e.clientY,
+                    width: node.width,
+                    height: node.height,
+                  };
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
       <div className="canvas-controls">
         <span>
           {plural(data.nodes.length, ["карточка", "карточки", "карточек"])} ·{" "}
           {plural(data.edges.length, ["связь", "связи", "связей"])}
         </span>
-        <button
-          title="Уменьшить"
-          onClick={() =>
-            setTransform((t) => ({
-              ...t,
-              scale: Math.max(0.12, (t.scale / 0.85) * 0.72),
-            }))
-          }
-        >
+        <button title="Уменьшить" onClick={() => zoom(0.85)}>
           <ZoomOut size={17} />
         </button>
         <span>{Math.round(transform.scale * 100)}%</span>
-        <button
-          title="Увеличить"
-          onClick={() =>
-            setTransform((t) => ({
-              ...t,
-              scale: Math.min(2.5, t.scale * 1.18),
-            }))
-          }
-        >
+        <button title="Увеличить" onClick={() => zoom(1.18)}>
           <ZoomIn size={17} />
         </button>
         <button title="Показать весь холст" onClick={fit}>

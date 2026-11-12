@@ -1,11 +1,50 @@
 import { ArrowUpDown, FileText, Filter, Table2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { parse as parseYaml, stringify } from "yaml";
 import { matchesFilter, rowEvaluator } from "../../shared/bases";
 import { frontmatter } from "../../shared/markdown";
+import {
+  parseProperty,
+  propertyType,
+  propertyTypes,
+  type PropertyType,
+} from "../../shared/properties";
+import { coordinates, summarize, summaryTypes } from "../../shared/summaries";
 import type { FileEntry, NoteIndex } from "../../shared/types";
 import { api } from "../useVault";
+import BaseMap from "./BaseMap";
 
+function PropertyCheckbox({
+  value,
+  label,
+  onChange,
+}: {
+  value: boolean;
+  label: string;
+  onChange: (checked: boolean) => Promise<boolean>;
+}) {
+  const [checked, setChecked] = useState(value),
+    [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setChecked(value);
+  }, [value]);
+  return (
+    <input
+      type="checkbox"
+      aria-label={label}
+      checked={checked}
+      disabled={busy}
+      onChange={async (event) => {
+        const next = event.target.checked;
+        setChecked(next);
+        setBusy(true);
+        const saved = await onChange(next);
+        if (!saved) setChecked(value);
+        setBusy(false);
+      }}
+    />
+  );
+}
 function display(value: unknown): string {
   if (value == null) return "";
   if (value instanceof Date) return value.toLocaleString("ru-RU");
@@ -74,7 +113,7 @@ export default function Bases({
       ? parsed.views
       : [{ type: "table", name: "Все заметки" }];
   const view = views[Math.min(viewIndex, views.length - 1)],
-    knownViews = ["table", "cards", "list", "kanban"];
+    knownViews = ["table", "cards", "list", "kanban", "map"];
   const columns: string[] = Array.isArray(view.order)
     ? view.order
     : [
@@ -161,6 +200,19 @@ export default function Bases({
       return "⚠ " + error.message;
     }
   };
+  const mapPoints = useMemo(
+    () =>
+      rows.flatMap((row) => {
+        const point = coordinates(
+          row.evaluator.get(view.latitude || "latitude"),
+          row.evaluator.get(view.longitude || "longitude"),
+        );
+        return point
+          ? [{ path: row.note.path, title: row.note.title, coordinates: point }]
+          : [];
+      }),
+    [rows, view.latitude, view.longitude],
+  );
   const setProperty = async (notePath: string, column: string, input: string) => {
     setEditing(null);
     setError("");
@@ -178,6 +230,15 @@ export default function Bases({
       try {
         value = parseYaml(input, { maxAliasCount: 10 });
       } catch {}
+      const declared =
+        parsed.properties?.[column]?.type ||
+        parsed.properties?.["note." + property]?.type ||
+        parsed.properties?.[property]?.type;
+      if (declared && Object.hasOwn(propertyTypes, declared))
+        value = parseProperty(
+          ["list", "tags"].includes(declared) && Array.isArray(value) ? value : input,
+          declared,
+        );
       await api().write(
         notePath,
         "---\n" +
@@ -186,8 +247,10 @@ export default function Bases({
           body,
         note.revision,
       );
+      return true;
     } catch (error: any) {
       setError(error.message);
+      return false;
     }
   };
   const cell = (row: (typeof rows)[number], column: string) => {
@@ -202,10 +265,39 @@ export default function Bases({
       row.file.kind === "note" &&
       !column.startsWith("file.") &&
       !column.startsWith("formula.");
+    const declared = parsed.properties?.[column]?.type;
+    const type: PropertyType =
+      declared && Object.hasOwn(propertyTypes, declared)
+        ? declared
+        : editable
+          ? propertyType(row.evaluator.get(column))
+          : "text";
+    if (type === "checkbox" && editable)
+      return (
+        <PropertyCheckbox
+          label={column + ": " + row.note.title}
+          value={row.evaluator.get(column) === true}
+          onChange={(checked) =>
+            setProperty(row.note.path, column, String(checked)).then(Boolean)
+          }
+        />
+      );
     if (editing?.path === row.note.path && editing.column === column)
       return (
         <input
           autoFocus
+          aria-label={"Изменить " + column}
+          type={
+            type === "number"
+              ? "number"
+              : type === "date"
+                ? "date"
+                : type === "datetime"
+                  ? "datetime-local"
+                  : type === "url"
+                    ? "url"
+                    : "text"
+          }
           defaultValue={get(row, column)}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
@@ -299,7 +391,9 @@ export default function Bases({
         </div>
       )}
       {error && <div className="save-error">{error}</div>}
-      {view.type === "cards" || view.type === "list" ? (
+      {view.type === "map" ? (
+        <BaseMap points={mapPoints} onOpen={onOpen} />
+      ) : view.type === "cards" || view.type === "list" ? (
         <div className={"base-cards " + (view.type === "list" ? "base-list" : "")}>
           {rows.map((row) => (
             <article className="base-card" key={row.note.path}>
@@ -387,6 +481,33 @@ export default function Bases({
                             : column.replace(/^note\./, ""))}
                       <ArrowUpDown size={12} />
                     </button>
+                    {!column.startsWith("file.") && !column.startsWith("formula.") && (
+                      <select
+                        className="base-property-type"
+                        aria-label={"Тип " + column}
+                        value={parsed.properties?.[column]?.type || ""}
+                        onChange={(event) => {
+                          const next = {
+                            ...parsed,
+                            properties: {
+                              ...parsed.properties,
+                              [column]: {
+                                ...parsed.properties?.[column],
+                                type: event.target.value,
+                              },
+                            },
+                          };
+                          onChange(stringify(next));
+                        }}
+                      >
+                        <option value="">Авто</option>
+                        {Object.entries(propertyTypes).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </th>
                 ))}
               </tr>
@@ -400,6 +521,65 @@ export default function Bases({
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                {columns.map((column) => (
+                  <td key={column}>
+                    <select
+                      aria-label={"Итог " + column}
+                      value={view.summaries?.[column] || ""}
+                      onChange={(event) =>
+                        onChange(
+                          stringify({
+                            ...parsed,
+                            views: views.map((item: unknown, i: number) =>
+                              i === viewIndex
+                                ? {
+                                    ...view,
+                                    summaries: {
+                                      ...view.summaries,
+                                      [column]: event.target.value,
+                                    },
+                                  }
+                                : item,
+                            ),
+                          }),
+                        )
+                      }
+                    >
+                      <option value="">Итог…</option>
+                      {Object.entries({
+                        ...summaryTypes,
+                        ...Object.fromEntries(
+                          Object.keys(parsed.summaries || {}).map((key) => [key, key]),
+                        ),
+                      }).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    {view.summaries?.[column] && (
+                      <strong className="base-summary">
+                        {(() => {
+                          try {
+                            return display(
+                              summarize(
+                                rows.map((row) => row.evaluator.get(column)),
+                                view.summaries[column],
+                                parsed.summaries || {},
+                              ),
+                            );
+                          } catch (error: any) {
+                            return "⚠ " + error.message;
+                          }
+                        })()}
+                      </strong>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}

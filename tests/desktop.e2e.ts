@@ -717,3 +717,122 @@ test("расширенный поиск сочетает группы, свой�
   await expect(page.locator(".search-result")).toHaveCount(1);
   await expect(page.locator(".search-result")).toContainText("Вторая");
 });
+
+test("база: типы, итоги и карта с нулевыми координатами", async () => {
+  await fs.writeFile(
+    path.join(root, "Место.md"),
+    "---\nprice: 12\ndone: false\nlatitude: 0\nlongitude: 0\n---\n# Место",
+  );
+  await fs.writeFile(
+    path.join(root, "Места.base"),
+    'filters: file.ext == "md"\nproperties:\n  price:\n    type: number\n  done:\n    type: checkbox\nviews:\n  - type: table\n    name: Таблица\n    order: [file.name, price, done]\n    summaries:\n      price: Sum\n  - type: map\n    name: Карта\n',
+  );
+  await page.locator(".tree-file").filter({ hasText: "Места" }).click();
+  await expect(page.locator(".base-summary")).toHaveText("12");
+  const checkbox = page.getByRole("checkbox", { name: "done: Место" });
+  await checkbox.check();
+  await expect
+    .poll(() => fs.readFile(path.join(root, "Место.md"), "utf8"))
+    .toContain("done: true");
+  await page.getByLabel("Представление базы").selectOption({ label: "Карта" });
+  await expect(page.locator(".base-map-points")).toContainText("Место");
+  await expect(page.locator(".base-map-points")).toContainText("0, 0");
+  await expect(page.locator(".leaflet-tile")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Загрузить карту OpenStreetMap" }),
+  ).toBeVisible();
+});
+
+test("встроенная веб-карточка изолирована и закрывается вместе с холстом", async () => {
+  const server = http.createServer((_request, response) => {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end("<h1>Встроенная страница</h1>");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number },
+    url = `http://127.0.0.1:${address.port}/`;
+  try {
+    await fs.writeFile(
+      path.join(root, "Веб.canvas"),
+      JSON.stringify({
+        nodes: [{ id: "web", type: "link", url, x: 0, y: 0, width: 500, height: 400 }],
+        edges: [],
+      }),
+    );
+    await page.locator(".tree-file").filter({ hasText: "Веб" }).click();
+    await page.getByRole("button", { name: "Открыть здесь", exact: true }).click();
+    await expect
+      .poll(() =>
+        application.evaluate(
+          ({ webContents }, address) =>
+            webContents.getAllWebContents().some((c) => c.getURL() === address),
+          url,
+        ),
+      )
+      .toBe(true);
+    const isolated = await application.evaluate(async ({ webContents }, address) => {
+      const contents = webContents
+        .getAllWebContents()
+        .find((c) => c.getURL() === address)!;
+      return contents.executeJavaScript(
+        '({node: typeof require, process: typeof process, bridge: typeof window.veltrite, title: document.querySelector("h1").textContent})',
+      );
+    }, url);
+    expect(isolated).toEqual({
+      node: "undefined",
+      process: "undefined",
+      bridge: "undefined",
+      title: "Встроенная страница",
+    });
+    await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+    await expect
+      .poll(() =>
+        application.evaluate(
+          ({ webContents }, address) =>
+            webContents.getAllWebContents().some((c) => c.getURL() === address),
+          url,
+        ),
+      )
+      .toBe(false);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("большой холст сохраняет все карточки и ограничивает количество редакторов на экране", async () => {
+  const nodes = Array.from({ length: 5000 }, (_, i) => ({
+    id: String(i),
+    type: "text",
+    text: "Карточка " + i,
+    x: (i % 100) * 260,
+    y: Math.floor(i / 100) * 180,
+    width: 240,
+    height: 160,
+    extra: { preserve: true },
+  }));
+  const original = JSON.stringify({ nodes, edges: [], custom: { preserve: true } });
+  await fs.writeFile(path.join(root, "Большой.canvas"), original);
+  await page.locator(".tree-file").filter({ hasText: "Большой" }).click();
+  await expect(page.locator(".canvas-overview")).toBeVisible();
+  await expect(page.locator(".canvas-controls")).toContainText("5000 карточек");
+  for (let i = 0; i < 16; i++)
+    await page.getByTitle("Увеличить", { exact: true }).click();
+  await expect(page.locator(".canvas-overview")).toHaveCount(0);
+  await expect.poll(() => page.locator(".canvas-node").count()).toBeGreaterThan(0);
+  expect(await page.locator(".canvas-node").count()).toBeLessThan(200);
+  await page.locator(".canvas-node textarea").first().fill("Изменённая карточка");
+  await expect
+    .poll(async () =>
+      JSON.parse(await fs.readFile(path.join(root, "Большой.canvas"), "utf8")).nodes.some(
+        (n: { text: string }) => n.text === "Изменённая карточка",
+      ),
+    )
+    .toBe(true);
+  const saved = JSON.parse(await fs.readFile(path.join(root, "Большой.canvas"), "utf8"));
+  expect(saved.nodes).toHaveLength(5000);
+  expect(saved.custom).toEqual({ preserve: true });
+  expect(
+    saved.nodes.every((n: { extra: { preserve: boolean } }) => n.extra.preserve),
+  ).toBe(true);
+});

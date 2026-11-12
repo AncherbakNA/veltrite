@@ -237,6 +237,12 @@ export interface VeltriteAPI {
     pages: { path: string; title: string; html: string }[],
   ): Promise<number | null>;
   webViewer(url: string): Promise<void>;
+  webCardOpen(id: string, url: string): Promise<void>;
+  webCardBounds(
+    id: string,
+    bounds: { x: number; y: number; width: number; height: number; visible: boolean },
+  ): Promise<void>;
+  webCardClose(id: string): Promise<void>;
   plugins(): Promise<PluginInfo[]>;
   installPlugin(): Promise<PluginInfo | null>;
   togglePlugin(id: string, enabled: boolean): Promise<void>;

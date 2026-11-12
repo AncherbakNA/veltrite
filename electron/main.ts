@@ -24,6 +24,7 @@ import { safePath } from "./paths";
 import { Plugins } from "./plugins";
 import { synchronize, type SyncCheckpoint } from "./sync";
 import { atomicWrite, hash, MAX_FILE, Serial, Vault } from "./vault";
+import { WebCards, type CardBounds } from "./web-cards";
 const CLIENT_ID = process.env.VELTRITE_GITHUB_CLIENT_ID || "";
 const RELEASE_REPOSITORY = process.env.VELTRITE_RELEASE_REPOSITORY || "";
 const testMode = process.env.VELTRITE_TEST_MODE === "1";
@@ -33,6 +34,10 @@ if (testMode) {
   app.setPath("userData", process.env.VELTRITE_TEST_DATA);
 }
 protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "veltrite-map",
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
   {
     scheme: "veltrite-asset",
     privileges: {
@@ -46,6 +51,7 @@ protocol.registerSchemesAsPrivileged([
 app.setName("Veltrite");
 if (process.platform === "win32") app.setAppUserModelId("app.veltrite.desktop");
 let mainWindow: BrowserWindow;
+let webCards: WebCards;
 let vault: Vault | null = null;
 let watcher: FSWatcher | null = null;
 let changeTimer: NodeJS.Timeout | null = null;
@@ -547,6 +553,9 @@ const methods: Record<string, (...args: any[]) => any> = {
       path.join(__dirname, "../dist/assets"),
     );
   },
+  webCardOpen: (id: string, url: string) => webCards.open(id, url),
+  webCardBounds: (id: string, bounds: CardBounds) => webCards.bounds(id, bounds),
+  webCardClose: (id: string) => webCards.close(id),
   webViewer: async (url: string) => {
     if (typeof url !== "string" || !/^https?:\/\//i.test(url) || url.length > 8192)
       throw Error("Введите ссылку HTTP или HTTPS");
@@ -651,16 +660,21 @@ async function createWindow() {
       spellcheck: true,
     },
   });
+  webCards = new WebCards(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!url.startsWith(pathToFileURL(path.join(__dirname, "../dist/")).href))
       event.preventDefault();
   });
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) =>
-    callback(permission === "media" && !testMode),
+    callback(permission === "media" && !testMode && _contents === mainWindow.webContents),
   );
   session.defaultSession.setPermissionCheckHandler(
-    (_contents, permission) => permission === "media" && !testMode,
+    (_contents, permission, origin) =>
+      permission === "media" &&
+      !testMode &&
+      _contents === mainWindow.webContents &&
+      origin.startsWith("file://"),
   );
   await mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   mainWindow.on("close", (event) => {
@@ -681,6 +695,24 @@ app
     store = new ConfigStore(app.getPath("userData"));
     plugins = new Plugins(path.join(app.getPath("userData"), "plugins"));
     setupIpc();
+    protocol.handle("veltrite-map", async (request) => {
+      const url = new URL(request.url),
+        match = /^\/(\d+)\/(\d+)\/(\d+)\.png$/.exec(url.pathname);
+      if (url.hostname !== "tile" || !match) return new Response(null, { status: 400 });
+      const [z, x, y] = match.slice(1).map(Number);
+      if (z > 18 || x >= 2 ** z || y >= 2 ** z)
+        return new Response(null, { status: 400 });
+      try {
+        return await net.fetch(`https://tile.openstreetmap.org/${z}/${x}/${y}.png`, {
+          headers: {
+            "User-Agent": `Veltrite/${app.getVersion()} (+https://github.com/AncherbakNA/veltrite)`,
+          },
+          signal: AbortSignal.timeout(10000),
+        });
+      } catch {
+        return new Response(null, { status: 503 });
+      }
+    });
     protocol.handle("veltrite-asset", async (request) => {
       try {
         const url = new URL(request.url);
