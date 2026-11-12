@@ -104,7 +104,7 @@ export function CommandPalette({
   const filtered = commands
     .filter((c) => c.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
     .slice(0, 80);
-  useEffect(() => setSelected(0), [query]);
+  const selectedIndex = Math.max(0, Math.min(selected, filtered.length - 1));
   useEffect(() => {
     dialog.current
       ?.querySelector(".command-list .selected")
@@ -137,9 +137,9 @@ export function CommandPalette({
             e.preventDefault();
             setSelected((i) => Math.max(0, i - 1));
           }
-          if (e.key === "Enter" && filtered[selected]) {
+          if (e.key === "Enter" && filtered[selectedIndex]) {
             e.preventDefault();
-            invoke(filtered[selected]);
+            invoke(filtered[selectedIndex]);
           }
         }}
       >
@@ -148,7 +148,10 @@ export function CommandPalette({
           <input
             autoFocus
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelected(0);
+            }}
             placeholder={placeholder}
           />
           <kbd>esc</kbd>
@@ -157,7 +160,7 @@ export function CommandPalette({
           {filtered.map((command, i) => (
             <button
               key={command.id}
-              className={i === selected ? "selected" : ""}
+              className={i === selectedIndex ? "selected" : ""}
               onMouseEnter={() => setSelected(i)}
               onClick={() => invoke(command)}
             >

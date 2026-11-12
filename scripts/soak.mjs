@@ -93,6 +93,16 @@ try {
     await page.keyboard.press(`${modifier}+o`);
     await page.getByPlaceholder("Перейти к файлу…").fill(name);
     await page.keyboard.press("Enter");
+    const filename =
+      name === "Большой"
+        ? name + ".canvas"
+        : name === "Обзор"
+          ? name + ".base"
+          : name + ".md";
+    await expect(page.locator('.tab-open[aria-selected="true"]')).toHaveAttribute(
+      "title",
+      filename,
+    );
   };
   const command = async (name) => {
     await page.keyboard.press(`${modifier}+p`);
@@ -114,6 +124,15 @@ try {
       cycle: report.cycles,
       heapMiB: Math.round((heap.usedSize / 1048576) * 10) / 10,
       processes,
+      cssRules: await page.evaluate(() =>
+        [...document.styleSheets].reduce((total, sheet) => {
+          try {
+            return total + sheet.cssRules.length;
+          } catch {
+            return total;
+          }
+        }, 0),
+      ),
       dom: await page.locator("*").count(),
       tabs: await page.locator(".tab").count(),
       windows: await app.evaluate(
@@ -133,7 +152,10 @@ try {
       filename = name + ".md";
     await open(name);
     await command("Редактор: исходный код");
-    const text = `---\nvalue: 1\n---\n# Сеанс ${cycle}\n\n[[n1499]]\n\nЦикл ${cycle}.\n`;
+    await expect(page.locator(".source-editor")).toBeVisible();
+    const text =
+      `---\nvalue: 1\n---\n# Сеанс ${cycle}\n\n[[n1499]]\n\nЦикл ${cycle}.\n\n` +
+      "| Поле | Значение |\n| --- | --- |\n| Число | 2 |\n\n$$x^2 + y^2$$\n\n```mermaid\ngraph LR\n A[Начало] --> B[Готово]\n```\n\n";
     await page.locator(".cm-content").fill(text);
     await page.keyboard.press(`${modifier}+s`);
     await expect.poll(() => fs.readFile(path.join(root, filename), "utf8")).toBe(text);
@@ -159,6 +181,8 @@ try {
         await window.veltrite.togglePlugin("timestamp", true, ["editor.write"]);
       });
     }
+    await page.locator(".cm-content").click();
+    await page.keyboard.press(`${modifier}+End`);
     await page.evaluate(() => window.veltrite.executePlugin("timestamp", "insert"));
     await expect(page.locator(".cm-content")).toContainText(
       String(new Date().getFullYear()),
@@ -172,6 +196,7 @@ try {
     expectedNotes.set(filename, saved);
     await page.getByRole("button", { name: "Чтение", exact: true }).click();
     await page.getByRole("button", { name: "Правка", exact: true }).click();
+    await expect(page.locator(".cm-rendered-mermaid .diagram svg")).toBeVisible();
     await open("Большой");
     await expect(page.locator(".canvas-overview")).toBeVisible();
     await open("Обзор");

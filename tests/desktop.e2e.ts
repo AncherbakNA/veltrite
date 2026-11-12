@@ -1271,3 +1271,37 @@ test("основной медный акцент адаптируется к т�
     )
     .toBe("#74805a");
 });
+
+test("Enter сразу после фильтра выбирает команду после наведения на другой результат", async () => {
+  await page.keyboard.press(`${modifier}+p`);
+  await page.locator(".command-list button").nth(5).hover();
+  await page.getByPlaceholder("Найти команду…").fill("Открыть корзину");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Корзина", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("dialog", { name: "Палитра команд", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("переключения режима редактора не накапливают CSS-правила", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  const toggle = async () => {
+    await page.getByRole("button", { name: "Чтение", exact: true }).click();
+    await page.getByRole("button", { name: "Правка", exact: true }).click();
+    await expect(page.locator(".cm-content")).toBeVisible();
+  };
+  const rules = () =>
+    page.evaluate(() =>
+      [...document.styleSheets].reduce((total, sheet) => {
+        try {
+          return total + sheet.cssRules.length;
+        } catch {
+          return total;
+        }
+      }, 0),
+    );
+  await toggle();
+  const before = await rules();
+  for (let i = 0; i < 12; i++) await toggle();
+  expect(await rules()).toBeLessThanOrEqual(before + 4);
+});

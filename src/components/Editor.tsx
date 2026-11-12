@@ -22,6 +22,40 @@ const colors = HighlightStyle.define([
   { tag: tags.quote, color: "var(--muted)" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
 ]);
+// Reuse the style module: CodeMirror retains mounted CSS rules for the document lifetime.
+const editorTheme = EditorView.theme({
+  "&": {
+    height: "100%",
+    backgroundColor: "transparent",
+    color: "var(--text)",
+  },
+  ".cm-content": {
+    fontFamily: "var(--note-font)",
+    fontSize: "var(--editor-size)",
+    lineHeight: "1.6",
+    padding: "8px 0 160px",
+  },
+  ".cm-line": { padding: "0 3px" },
+  ".cm-scroller": { fontFamily: "inherit", overflow: "auto" },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    color: "var(--muted)",
+    border: "none",
+  },
+  "&.cm-focused": { outline: "none" },
+  ".cm-cursor": { borderLeftColor: "var(--accent)" },
+  ".cm-activeLine": { backgroundColor: "transparent" },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+    backgroundColor: "var(--selection)",
+  },
+  ".cm-activeLineGutter": { backgroundColor: "transparent" },
+  ".cm-tooltip": {
+    backgroundColor: "var(--panel)",
+    border: "1px solid var(--border)",
+    color: "var(--text)",
+  },
+  ".cm-search": { background: "var(--panel)" },
+});
 export default function Editor({
   content,
   path,
@@ -88,39 +122,7 @@ export default function Editor({
           vimConfig.current.of(preferences.vimMode ? vim() : []),
           settings.current.of(preferences.lineNumbers ? lineNumbers() : []),
           placeholder("Текст заметки…"),
-          EditorView.theme({
-            "&": {
-              height: "100%",
-              backgroundColor: "transparent",
-              color: "var(--text)",
-            },
-            ".cm-content": {
-              fontFamily: "var(--note-font)",
-              fontSize: "var(--editor-size)",
-              lineHeight: "1.6",
-              padding: "8px 0 160px",
-            },
-            ".cm-line": { padding: "0 3px" },
-            ".cm-scroller": { fontFamily: "inherit", overflow: "auto" },
-            ".cm-gutters": {
-              backgroundColor: "transparent",
-              color: "var(--muted)",
-              border: "none",
-            },
-            "&.cm-focused": { outline: "none" },
-            ".cm-cursor": { borderLeftColor: "var(--accent)" },
-            ".cm-activeLine": { backgroundColor: "transparent" },
-            ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-              backgroundColor: "var(--selection)",
-            },
-            ".cm-activeLineGutter": { backgroundColor: "transparent" },
-            ".cm-tooltip": {
-              backgroundColor: "var(--panel)",
-              border: "1px solid var(--border)",
-              color: "var(--text)",
-            },
-            ".cm-search": { background: "var(--panel)" },
-          }),
+          editorTheme,
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               change.current(update.state.doc.toString());
