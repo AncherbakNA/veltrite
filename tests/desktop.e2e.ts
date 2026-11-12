@@ -1070,7 +1070,12 @@ test("новая заметка, свойства, закладка, истор�
     .getByTitle("Действия с файлом")
     .click();
   await page.getByRole("button", { name: "В корзину", exact: true }).click();
-  await page.getByRole("button", { name: "В корзину", exact: true }).click();
+  const trashDialog = page.getByRole("dialog", {
+    name: "Переместить в корзину?",
+    exact: true,
+  });
+  await trashDialog.getByRole("button", { name: "В корзину", exact: true }).click();
+  await expect(trashDialog).toBeHidden();
   await expect
     .poll(() =>
       fs.stat(path.join(root, "Работа", "Новая.md")).then(
