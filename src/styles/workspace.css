@@ -577,7 +577,7 @@
   margin-bottom: 8px;
 }
 .eyebrow b {
-  font: 9px var(--body);
+  font: 12px var(--body);
   background: var(--surface);
   padding: 0px 4px;
   border-radius: var(--r-sm);
@@ -735,7 +735,7 @@
 .theme-sample > i {
   display: block;
   width: 27%;
-  background: #121923;
+  background: #20201f;
   border-right: 1px solid #ffffff10;
 }
 .theme-sample > span {
@@ -746,7 +746,7 @@
   width: 46%;
   height: 5px;
   display: block;
-  background: #b5a0ef;
+  background: #b2afa7;
   border-radius: var(--r-sm);
   margin-bottom: 12px;
 }
@@ -755,26 +755,24 @@
   height: 3px;
   margin-bottom: 8px;
   border-radius: var(--r-sm);
-  background: #8893a759;
+  background: #b2afa759;
 }
 .theme-sample span > i:last-child {
   width: 66%;
 }
 .sample-light {
   background: #fbfaf7;
-  border-color: #c6cfdf;
+  border-color: #d7d2c8;
 }
 .sample-light > i {
-  background: #e7edf7;
-  border-color: #ccd6e5;
+  background: #f1eee8;
+  border-color: #d7d2c8;
 }
 .sample-light span > i {
-  background: #b2bdcf;
-}
-.sample-system {
+  background: #b0a99d;
 }
 .sample-system > i {
-  background: #e7edf7;
+  background: #f1eee8;
 }
 .theme-choice-label {
   display: flex;

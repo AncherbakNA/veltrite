@@ -937,16 +937,24 @@ export default function App() {
                       ? "Ошибка синхронизации"
                       : ""}
                 </button>
-                {current && !home && !graph && !collection && (
-                  <>
-                    <span>
-                      {plural(currentIndex?.words || 0, ["слово", "слова", "слов"])}
-                    </span>
-                    <span>
-                      {plural(current.content.length, ["символ", "символа", "символов"])}
-                    </span>
-                  </>
-                )}
+                {current &&
+                  /\.md$/i.test(current.path) &&
+                  !home &&
+                  !graph &&
+                  !collection && (
+                    <>
+                      <span>
+                        {plural(currentIndex?.words || 0, ["слово", "слова", "слов"])}
+                      </span>
+                      <span>
+                        {plural(current.content.length, [
+                          "символ",
+                          "символа",
+                          "символов",
+                        ])}
+                      </span>
+                    </>
+                  )}
               </div>
             </footer>
           </>

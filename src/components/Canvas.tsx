@@ -1,6 +1,7 @@
 import {
   ArrowUpRight,
   FileText,
+  GripHorizontal,
   Group,
   Link,
   Maximize,
@@ -15,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { plural } from "../../shared/format";
 import { validateCanvas } from "../../shared/markdown";
 import type { CanvasData, CanvasNode, NoteIndex } from "../../shared/types";
+import { fileTitle } from "../ui";
 import { api } from "../useVault";
 import Markdown, { assetUrl } from "./Markdown";
 const palette: Record<string, string> = {
@@ -442,10 +444,10 @@ export default function Canvas({
           <PanelsIcon />
           <h2>Пустой холст</h2>
           <p>Добавьте карточки, заметки и связи между ними</p>
-          <button className="primary" onClick={() => add("text")}>
-            <Plus size={16} />
-            Первая карточка
-          </button>
+          <p>
+            Нажмите «Текст» или «Файл» на верхней панели. Для соединения карточек включите
+            «Связь».
+          </p>
         </div>
       )}
       <div
@@ -511,7 +513,6 @@ export default function Canvas({
                 top: node.y,
                 width: node.width,
                 height: node.height,
-                borderColor: color(node.color),
                 "--node-color": color(node.color),
               } as React.CSSProperties
             }
@@ -575,17 +576,15 @@ export default function Canvas({
               }}
             >
               <span>
-                {node.type === "text"
-                  ? "Текст"
-                  : node.type === "file"
-                    ? node.file
-                    : node.type === "link"
-                      ? node.url
-                      : node.label || "Группа"}
+                {node.type === "file" ? (
+                  fileTitle(node.file)
+                ) : (
+                  <GripHorizontal size={16} className="canvas-grip" />
+                )}
               </span>
               {node.type === "file" && (
                 <button title="Открыть файл" onClick={() => onOpen(node.file)}>
-                  <ArrowUpRight size={14} />
+                  <FileText size={16} />
                 </button>
               )}
             </div>
@@ -615,7 +614,6 @@ export default function Canvas({
                 className="canvas-link"
                 onClick={() => api().openExternal(node.url)}
               >
-                <ArrowUpRight size={24} />
                 {node.url}
               </button>
             )}

@@ -313,7 +313,7 @@ test("создание холста, изменение карточки и со
   await page.getByPlaceholder("Папка/Название").fill("Мои идеи");
   await page.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(page.locator(".canvas-view")).toBeVisible();
-  await page.getByRole("button", { name: "Первая карточка" }).click();
+  await page.getByRole("button", { name: "Текстовая карточка", exact: true }).click();
   await page.getByRole("textbox", { name: "Текст карточки" }).fill("Идея на холсте");
   await expect
     .poll(

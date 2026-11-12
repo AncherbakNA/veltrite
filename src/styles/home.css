@@ -175,13 +175,13 @@
 }
 .welcome-content {
   width: min(550px, 100%);
-  padding: 66px 28px 40px;
+  padding: 64px 28px 40px;
 }
 .welcome-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 18px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 .welcome-brand h1 {
   font-size: 26px;
@@ -198,21 +198,21 @@
 .welcome-actions {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 8px;
 }
 .welcome-action {
   justify-content: flex-start;
-  gap: 13px;
+  gap: 12px;
   border: 1px solid var(--border);
   background: var(--panel);
-  padding: 14px;
+  padding: 16px;
   border-radius: var(--r-md);
   text-align: left;
 }
 .welcome-action > span {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   flex: 1;
 }
 .welcome-action strong {
@@ -227,13 +227,13 @@
   opacity: 0.8;
 }
 .recent-vaults {
-  margin-top: 30px;
+  margin-top: 32px;
 }
 .recent-vaults h2 {
   color: var(--muted);
   font-size: 12px;
   font-weight: 500;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   letter-spacing: normal;
 }
 .recent-vaults > button {
@@ -241,8 +241,8 @@
   align-items: center;
   justify-content: flex-start;
   width: 100%;
-  gap: 10px;
-  padding: 11px 0;
+  gap: 8px;
+  padding: 12px 0;
   text-align: left;
   color: var(--muted);
 }

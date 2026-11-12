@@ -126,9 +126,6 @@ export default function Inspector({
                 )}
                 {id === "links" && (
                   <>
-                    <span className="eyebrow">
-                      Обратные ссылки <b>{backlinks.length}</b>
-                    </span>
                     {backlinks.map((n) => (
                       <button
                         className="simple-row"

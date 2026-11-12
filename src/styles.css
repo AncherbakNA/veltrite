@@ -24,6 +24,9 @@
   --mono: "SFMono-Regular", Consolas, monospace;
   --note-font: "Source Serif 4", Georgia, serif;
   --editor-size: 16px;
+  --note-h1: 1.75em;
+  --note-h2: 1.375em;
+  --note-h3: 1.125em;
   font-family: var(--body);
   font-size: 13px;
   color: var(--text);
@@ -164,7 +167,7 @@ small {
   line-height: 1.5;
 }
 kbd {
-  font: 11px var(--mono);
+  font: 12px var(--mono);
   color: var(--muted);
   background: var(--surface);
   padding: 4px 4px;
@@ -311,20 +314,20 @@ kbd {
   overflow-wrap: anywhere;
 }
 .markdown h1 {
-  font-size: 2em;
+  font-size: var(--note-h1);
   line-height: 1.25;
   letter-spacing: normal;
-  margin: 8px 0 28px;
+  margin: 8px 0 20px;
   font-weight: 650;
 }
 .markdown h2 {
-  font-size: 1.45em;
+  font-size: var(--note-h2);
   line-height: 1.3;
-  margin: 32px 0 16px;
+  margin: 24px 0 16px;
   letter-spacing: normal;
 }
 .markdown h3 {
-  font-size: 1.14em;
+  font-size: var(--note-h3);
   margin: 24px 0 12px;
   font-weight: 620;
 }
@@ -350,21 +353,19 @@ kbd {
   margin: 8px 0;
 }
 .markdown li::marker {
-  color: var(--accent-ink);
+  color: var(--muted);
 }
 .markdown blockquote {
-  border-left: 3px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 4%, transparent);
-  padding: 16px 20px;
-  margin: 24px 0;
-  border-radius: var(--r-md);
+  border-left: 1px solid var(--border-strong);
+  padding: 4px 16px;
+  margin: 20px 0;
   color: var(--muted);
 }
 .markdown blockquote p:last-child {
   margin-bottom: 0;
 }
 .markdown blockquote strong {
-  color: var(--accent-ink);
+  color: var(--text);
 }
 .markdown pre {
   background: var(--sidebar);
@@ -408,11 +409,16 @@ kbd {
 }
 .markdown td,
 .markdown th {
-  border: 1px solid var(--border);
   padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-weight: 400;
+  background: transparent;
 }
 .markdown th {
-  background: var(--surface);
+  text-align: left;
+  font-weight: 400;
+  background: transparent;
 }
 .markdown input[type="checkbox"] {
   margin-right: 8px;
@@ -786,7 +792,7 @@ kbd {
 .recovery-card textarea {
   height: 76px;
   resize: none;
-  font: 11px/1.7 var(--mono);
+  font: 12px/1.7 var(--mono);
   overflow-wrap: anywhere;
 }
 .recovery-card > button {
@@ -830,7 +836,7 @@ kbd {
   gap: 12px;
 }
 .device-code strong {
-  font: 25px var(--mono);
+  font: 26px var(--mono);
   letter-spacing: normal;
 }
 .toast {
@@ -1038,7 +1044,7 @@ kbd {
 }
 .canvas-node {
   position: absolute;
-  border: 1.5px solid var(--border-strong);
+  border: 1px solid color-mix(in srgb, var(--node-color) 55%, var(--border));
   border-radius: var(--r-md);
   background: var(--panel);
   display: flex;
@@ -1047,19 +1053,19 @@ kbd {
   will-change: left, top;
 }
 .canvas-node.selected {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 .canvas-node-header {
-  height: 34px;
-  min-height: 34px;
+  height: 28px;
+  min-height: 28px;
   cursor: grab;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  border-bottom: 1px solid var(--border);
   font-size: 12px;
   color: var(--muted);
-  background: color-mix(in srgb, var(--node-color) 8%, transparent);
 }
 .canvas-node-header > span {
   overflow: hidden;
@@ -1074,9 +1080,10 @@ kbd {
   border: none;
   background: transparent;
   flex: 1;
-  padding: 16px;
-  font-size: 13px;
-  line-height: 1.8;
+  padding: 8px 16px 16px;
+  font-family: var(--note-font);
+  font-size: 15px;
+  line-height: 1.6;
   border-radius: 0;
   width: 100%;
   outline: none;
@@ -1085,7 +1092,7 @@ kbd {
   outline: none;
 }
 .canvas-node.group {
-  background: color-mix(in srgb, var(--node-color) 4%, transparent);
+  background: transparent;
   overflow: visible;
   border-style: dashed;
 }
@@ -1126,11 +1133,11 @@ kbd {
 .canvas-link {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  align-items: flex-start;
+  justify-content: center;
   color: var(--accent-ink);
   overflow-wrap: anywhere;
-  padding: 20px;
+  padding: 12px;
 }
 .canvas-resize {
   position: absolute;
@@ -1172,6 +1179,10 @@ kbd {
 .canvas-edges text {
   font: 12px var(--body);
   fill: var(--text);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 6px;
+  stroke-linejoin: round;
 }
 .canvas-controls {
   position: absolute;
@@ -1403,12 +1414,6 @@ kbd {
   width: 100%;
   font-size: 12px;
 }
-.base-table th {
-  font-weight: 500;
-  text-align: left;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-}
 .base-table th button {
   justify-content: space-between;
   width: 100%;
@@ -1433,8 +1438,13 @@ kbd {
   font-size: 12px;
 }
 .base-table th {
+  text-align: left;
+  font-weight: 400;
+  background: transparent;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
 }
 .loading-screen {
   height: 100vh;
@@ -1694,4 +1704,46 @@ h3,
 .custom-accent input {
   width: 92px;
   padding: 4px 8px;
+}
+
+.canvas-node.text .canvas-node-header {
+  height: 16px;
+  min-height: 16px;
+}
+
+.cm-content .cm-note-h1 {
+  font-size: var(--note-h1);
+  font-weight: 700;
+  line-height: 1.25;
+  padding-top: 8px;
+  padding-bottom: 20px;
+  letter-spacing: -0.01em;
+}
+.cm-content .cm-note-h2 {
+  font-size: var(--note-h2);
+  font-weight: 700;
+  line-height: 1.3;
+  padding-top: 24px;
+  padding-bottom: 16px;
+  letter-spacing: -0.01em;
+}
+.cm-content .cm-note-h3 {
+  font-size: var(--note-h3);
+  font-weight: 700;
+  padding-top: 20px;
+  padding-bottom: 12px;
+  letter-spacing: -0.01em;
+}
+.cm-content .cm-note-quote {
+  border-left: 1px solid var(--border-strong);
+  padding-left: 16px;
+  color: var(--muted);
+}
+
+.canvas-grip {
+  opacity: 0;
+}
+.canvas-node:hover .canvas-grip,
+.canvas-node.selected .canvas-grip {
+  opacity: 1;
 }

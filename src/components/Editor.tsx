@@ -11,8 +11,6 @@ import type { Preferences } from "../../shared/types";
 import { livePreview } from "./livePreview";
 const colors = HighlightStyle.define([
   { tag: tags.heading, color: "var(--text)", fontWeight: "700" },
-  { tag: tags.heading1, fontSize: "1.7em" },
-  { tag: tags.heading2, fontSize: "1.35em" },
   { tag: tags.strong, fontWeight: "700", color: "var(--text)" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: [tags.link, tags.url], color: "var(--accent-ink)" },

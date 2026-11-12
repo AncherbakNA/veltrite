@@ -70,6 +70,14 @@ export function livePreview(open: (target: string) => void) {
         const line = view.state.doc.lineAt(from),
           text = line.text;
         const active = cursor.from <= line.to && cursor.to >= line.from;
+        const level = /^(#{1,6})\s/.exec(text)?.[1].length;
+        if (level)
+          ranges.push(
+            Decoration.line({ class: "cm-note-h" + Math.min(level, 3) }).range(line.from),
+          );
+        if (/^>\s?/.test(text))
+          ranges.push(Decoration.line({ class: "cm-note-quote" }).range(line.from));
+
         if (!active) {
           const heading = /^#{1,6}\s/.exec(text);
           if (heading)
