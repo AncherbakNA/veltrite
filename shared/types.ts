@@ -2,6 +2,7 @@ export type Theme = "dark" | "light" | "system";
 export interface Preferences {
   theme: Theme;
   fontSize: number;
+  textFont: "serif" | "sans" | "mono";
   lineNumbers: boolean;
   spellcheck: boolean;
   dailyFolder: string;
@@ -17,6 +18,7 @@ export interface Preferences {
 export const defaultPreferences: Preferences = {
   theme: "dark",
   fontSize: 16,
+  textFont: "serif",
   lineNumbers: false,
   spellcheck: true,
   dailyFolder: "Дневник",
@@ -25,7 +27,7 @@ export const defaultPreferences: Preferences = {
   autoSync: false,
   syncInterval: 300,
   readableLineLength: true,
-  accent: "#ad99ef",
+  accent: "#c0603a",
   vimMode: false,
   bookmarks: [],
 };

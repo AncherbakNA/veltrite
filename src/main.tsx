@@ -1,3 +1,7 @@
+import "@fontsource/source-serif-4/cyrillic-400.css";
+import "@fontsource/source-serif-4/cyrillic-700.css";
+import "@fontsource/source-serif-4/latin-400.css";
+import "@fontsource/source-serif-4/latin-700.css";
 import "katex/dist/katex.min.css";
 import React from "react";
 import { createRoot } from "react-dom/client";

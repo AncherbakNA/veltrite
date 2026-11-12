@@ -112,6 +112,19 @@ export default function App() {
       preferences.fontSize + "px",
     );
     document.documentElement.style.setProperty("--accent", preferences.accent);
+    document.documentElement.dataset.textFont = preferences.textFont;
+    const rgb = preferences.accent
+      .slice(1)
+      .match(/../g)!
+      .map((part) => {
+        const n = parseInt(part, 16) / 255;
+        return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
+      });
+    const luminance = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+    document.documentElement.style.setProperty(
+      "--accent-button-text",
+      luminance > 0.179 ? "#000000" : "#ffffff",
+    );
     return () => system.removeEventListener("change", applyTheme);
   }, [preferences]);
   useEffect(() => api().onMenu((action) => actionRef.current(action)), []);

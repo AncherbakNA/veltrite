@@ -12,7 +12,7 @@ import {
   TextCursorInput,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { PluginInfo, Preferences, SyncStatus } from "../../shared/types";
 import { useDialogFocus } from "../useDialogFocus";
 import { api } from "../useVault";
@@ -168,17 +168,67 @@ export default function Settings({
                   ))}
                 </div>
               </fieldset>
-              <div className="setting-row">
-                <div>
-                  <strong>Акцентный цвет</strong>
-                  <small>Ссылки, кнопки и выделение</small>
-                </div>
-                <input
+              <fieldset className="accent-picker">
+                <legend>Акцентный цвет</legend>
+                <div
+                  className="accent-swatches"
+                  role="radiogroup"
                   aria-label="Акцентный цвет"
-                  type="color"
-                  value={preferences.accent}
-                  onChange={(e) => update({ accent: e.target.value })}
-                />
+                >
+                  {[
+                    ["#c0603a", "Охра"],
+                    ["#3d63b8", "Чернила"],
+                    ["#51785b", "Зелёный"],
+                    ["#946341", "Коричневый"],
+                    ["#906176", "Сливовый"],
+                    ["#61747d", "Серый"],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-label={label}
+                      aria-checked={preferences.accent.toLowerCase() === value}
+                      disabled={busy}
+                      className="accent-swatch"
+                      style={{ "--swatch": value } as CSSProperties}
+                      onClick={() => update({ accent: value })}
+                    />
+                  ))}
+                  <label className="custom-accent">
+                    Свой
+                    <input
+                      aria-label="Свой акцентный цвет"
+                      placeholder="#c0603a"
+                      defaultValue={preferences.accent}
+                      key={preferences.accent}
+                      maxLength={7}
+                      pattern="#[0-9a-fA-F]{6}"
+                      onBlur={(e) => {
+                        if (/^#[0-9a-f]{6}$/i.test(e.target.value))
+                          update({ accent: e.target.value });
+                        else e.target.value = preferences.accent;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                    />
+                  </label>
+                </div>
+              </fieldset>
+              <div className="setting-row">
+                <label htmlFor="text-font">Шрифт текста</label>
+                <select
+                  id="text-font"
+                  value={preferences.textFont}
+                  onChange={(e) =>
+                    update({ textFont: e.target.value as Preferences["textFont"] })
+                  }
+                >
+                  <option value="serif">С засечками</option>
+                  <option value="sans">Без засечек</option>
+                  <option value="mono">Моноширинный</option>
+                </select>
               </div>
               <div className="setting-row">
                 <div>

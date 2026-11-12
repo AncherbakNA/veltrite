@@ -14,6 +14,7 @@ export function mergePreferences(base: Preferences, patch: unknown): Preferences
   ) as unknown as Preferences;
   if (
     !["dark", "light", "system"].includes(next.theme) ||
+    !["serif", "sans", "mono"].includes(next.textFont) ||
     !Number.isFinite(next.fontSize) ||
     next.fontSize < 11 ||
     next.fontSize > 28 ||

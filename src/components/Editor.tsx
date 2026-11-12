@@ -77,9 +77,9 @@ export default function Editor({
               color: "var(--text)",
             },
             ".cm-content": {
-              fontFamily: "var(--body)",
+              fontFamily: "var(--note-font)",
               fontSize: "var(--editor-size)",
-              lineHeight: "1.85",
+              lineHeight: "1.6",
               padding: "8px 0 160px",
             },
             ".cm-line": { padding: "0 3px" },
