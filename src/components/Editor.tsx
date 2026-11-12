@@ -69,7 +69,7 @@ export default function Editor({
           preview.current.of(live ? livePreview((target) => link.current(target)) : []),
           vimConfig.current.of(preferences.vimMode ? vim() : []),
           settings.current.of(preferences.lineNumbers ? lineNumbers() : []),
-          placeholder("Начните писать. Свяжите идею через [[заметку]]…"),
+          placeholder("Текст заметки…"),
           EditorView.theme({
             "&": {
               height: "100%",

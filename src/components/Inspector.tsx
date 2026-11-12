@@ -90,10 +90,10 @@ export default function Inspector({
           <span className={"context-tool-icon " + (canvas ? "kind-canvas" : "kind-base")}>
             <Icon size={27} />
           </span>
-          <h3>{canvas ? "Мысли в одном пространстве" : "Порядок в ваших заметках"}</h3>
+          <h3>{canvas ? "Карточки и связи" : "Представления базы"}</h3>
           <p className="context-intro">
             {canvas
-              ? "Расположите идеи рядом и покажите, как они связаны."
+              ? "Добавляйте карточки и соединяйте их связями."
               : "База показывает ваши файлы в удобном представлении."}
           </p>
           <ol className="tool-tips">
@@ -145,7 +145,7 @@ export default function Inspector({
       <div className="inspector-content">
         {rightTab === "outline" && (
           <>
-            <span className="eyebrow">СОДЕРЖАНИЕ</span>
+            <span className="eyebrow">Содержание</span>
             {currentIndex?.headings.length ? (
               currentIndex.headings.map((h, i) => (
                 <button
@@ -173,7 +173,7 @@ export default function Inspector({
             )}
             {currentIndex?.tags.length ? (
               <>
-                <span className="eyebrow section-spaced">ТЕГИ ЗАМЕТКИ</span>
+                <span className="eyebrow section-spaced">Теги заметки</span>
                 <div className="tags-wrap">
                   {currentIndex.tags.map((t) => (
                     <button className="tag" key={t} onClick={() => setSection("tags")}>
@@ -188,7 +188,7 @@ export default function Inspector({
         {rightTab === "links" && (
           <>
             <span className="eyebrow">
-              ОБРАТНЫЕ ССЫЛКИ <b>{backlinks.length}</b>
+              Обратные ссылки <b>{backlinks.length}</b>
             </span>
             {backlinks.map((n) => (
               <button className="simple-row" key={n.path} onClick={() => open(n.path)}>
@@ -200,7 +200,7 @@ export default function Inspector({
               <p className="empty-small">На эту заметку пока нет ссылок</p>
             )}
             <span className="eyebrow section-spaced">
-              ИСХОДЯЩИЕ ССЫЛКИ <b>{outgoing.length}</b>
+              Исходящие ссылки <b>{outgoing.length}</b>
             </span>
             {outgoing.map((n, i) => (
               <button
@@ -216,7 +216,7 @@ export default function Inspector({
         )}
         {rightTab === "properties" && (
           <>
-            <span className="eyebrow">СВОЙСТВА</span>
+            <span className="eyebrow">Свойства</span>
             {Object.entries(currentIndex?.properties || {}).map(([key, value]) => (
               <div className="property-row" key={key}>
                 <label>{key}</label>

@@ -4,7 +4,7 @@ const methods = [
   "state",
   "chooseVault",
   "openRecent",
-  "importObsidian",
+  "importFolder",
   "refresh",
   "read",
   "write",

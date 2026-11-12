@@ -12,6 +12,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { plural } from "../../shared/format";
 import { validateCanvas } from "../../shared/markdown";
 import type { CanvasData, CanvasNode, NoteIndex } from "../../shared/types";
 import { api } from "../useVault";
@@ -439,7 +440,7 @@ export default function Canvas({
       {!data.nodes.length && !parse.error && (
         <div className="canvas-empty">
           <PanelsIcon />
-          <h2>Дайте идеям пространство</h2>
+          <h2>Пустой холст</h2>
           <p>Добавьте карточки, заметки и связи между ними</p>
           <button className="primary" onClick={() => add("text")}>
             <Plus size={16} />
@@ -591,7 +592,7 @@ export default function Canvas({
             {node.type === "text" && (
               <textarea
                 aria-label="Текст карточки"
-                placeholder="Ваша мысль…"
+                placeholder="Текст карточки…"
                 value={node.text}
                 onPointerDown={(e) => e.stopPropagation()}
                 onChange={(e) =>
@@ -654,7 +655,8 @@ export default function Canvas({
       </div>
       <div className="canvas-controls">
         <span>
-          {data.nodes.length} карточек · {data.edges.length} связей
+          {plural(data.nodes.length, ["карточка", "карточки", "карточек"])} ·{" "}
+          {plural(data.edges.length, ["связь", "связи", "связей"])}
         </span>
         <button
           title="Уменьшить"

@@ -182,7 +182,7 @@ export interface VeltriteAPI {
   state(): Promise<AppState>;
   chooseVault(create: boolean): Promise<VaultInfo | null>;
   openRecent(root: string): Promise<VaultInfo>;
-  importObsidian(): Promise<ImportResult | null>;
+  importFolder(): Promise<ImportResult | null>;
   refresh(): Promise<FileEntry[]>;
   read(path: string): Promise<NoteData>;
   write(path: string, content: string, revision?: string): Promise<NoteData>;

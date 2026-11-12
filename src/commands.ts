@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
+import { plural } from "../shared/format";
 import type { HistoryItem, NoteIndex, Preferences, VaultInfo } from "../shared/types";
 import type { Command, DialogData } from "./components/Dialog";
 import { api, type Tab, useVault } from "./useVault";
@@ -156,7 +157,7 @@ export function buildCommands(context: CommandContext): Command[] {
     },
     {
       id: "import",
-      name: "Импортировать хранилище Obsidian",
+      name: "Импортировать папку",
       run: importVault,
     },
     {
@@ -354,7 +355,7 @@ export function buildCommands(context: CommandContext): Command[] {
           const count = await api().publishSite(pages);
           if (count !== null)
             message(
-              `Сайт готов: ${count} страниц. Его можно разместить на GitHub Pages или своём хостинге.`,
+              `Сайт готов: ${plural(count, ["страница", "страницы", "страниц"])}. Его можно разместить на GitHub Pages или своём хостинге.`,
             );
         }),
     },
@@ -371,10 +372,10 @@ export function buildCommands(context: CommandContext): Command[] {
     },
     {
       id: "workspace-save",
-      name: "Сохранить рабочее пространство",
+      name: "Сохранить набор вкладок",
       run: () =>
         setDialog({
-          title: "Сохранить рабочее пространство",
+          title: "Сохранить набор вкладок",
           placeholder: "Название",
           confirm: "Сохранить",
           onSubmit: async (name) => {
@@ -382,17 +383,17 @@ export function buildCommands(context: CommandContext): Command[] {
               tabs: tabs.map((t) => t.path),
               active,
             });
-            message("Рабочее пространство сохранено");
+            message("Набор вкладок сохранён");
           },
         }),
     },
     {
       id: "workspace-open",
-      name: "Открыть рабочее пространство",
+      name: "Открыть набор вкладок",
       run: () =>
         run(async () =>
           setPalette({
-            placeholder: "Рабочие пространства…",
+            placeholder: "Наборы вкладок…",
             commands: (await api().workspaces()).map((w) => ({
               id: w.name,
               name: w.name,

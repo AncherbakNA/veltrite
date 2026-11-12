@@ -78,7 +78,7 @@ export default function AppHeader({
             </button>
           </>
         ) : (
-          <span className="header-tagline">Ваши мысли. Ваши файлы.</span>
+          <span className="header-tagline">Локальные заметки</span>
         )}
       </div>
     </header>

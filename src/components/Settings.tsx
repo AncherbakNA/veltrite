@@ -99,7 +99,7 @@ export default function Settings({
         aria-label="Настройки"
       >
         <nav className="settings-nav">
-          <span className="eyebrow">НАСТРОЙКИ</span>
+          <span className="eyebrow">Настройки</span>
           {sections.map(([id, Icon, title]) => (
             <button
               className={tab === id ? "active" : ""}
@@ -113,7 +113,7 @@ export default function Settings({
           <div className="settings-brand">
             <BrandMark size={34} />
             <strong>Veltrite</strong>
-            <small>Ваши мысли. Ваши файлы.</small>
+            <small>Локальные заметки</small>
           </div>
         </nav>
         <div className="settings-content">
@@ -126,11 +126,11 @@ export default function Settings({
           </button>
           {tab === "appearance" && (
             <>
-              <h2>Ваше пространство</h2>
-              <p className="muted">Настройте Veltrite под себя.</p>
+              <h2>Оформление</h2>
+
               <fieldset className="theme-picker">
                 <legend>Цветовая тема</legend>
-                <p>Выберите оформление, в котором приятно думать.</p>
+
                 <div className="theme-choices">
                   {(
                     [
@@ -532,8 +532,7 @@ export default function Settings({
             <>
               <h2>Расширения</h2>
               <p className="muted">
-                Команды Veltrite из JSON-манифестов. JavaScript-плагины Obsidian требуют
-                отдельной совместимости и здесь не запускаются.
+                Команды Veltrite из JSON-манифестов. JavaScript-расширения не поддерживаются.
               </p>
               <button
                 onClick={() =>
@@ -574,7 +573,7 @@ export default function Settings({
             <>
               <div className="about-logo">V</div>
               <h2>Veltrite</h2>
-              <p className="muted">Пространство для мыслей и связей.</p>
+              <p className="muted">Заметки, холсты и базы в локальной папке.</p>
               <div className="info-card">
                 Обычные Markdown-файлы, открытый формат холстов JSON Canvas, локальная
                 работа и ваш собственный GitHub-репозиторий.
@@ -602,8 +601,8 @@ export default function Settings({
                 </button>
               </div>
               <p className="field-help">
-                Veltrite — самостоятельное приложение. Это ранняя версия: полный API и все
-                расширенные режимы Obsidian пока не воспроизведены.
+                Ранняя версия. Поддерживаются расширения из JSON-манифестов и основные
+                операции с файлами .canvas и .base.
               </p>
             </>
           )}

@@ -1,12 +1,4 @@
-import {
-  ArrowUpRight,
-  ChevronLeft,
-  FileText,
-  PanelsTopLeft,
-  Plus,
-  Search,
-  Table2,
-} from "lucide-react";
+import { ChevronLeft, FileText, PanelsTopLeft, Plus, Search, Table2 } from "lucide-react";
 import { useState } from "react";
 import type { FileEntry, NoteIndex } from "../../shared/types";
 import { fileTitle } from "../ui";
@@ -23,28 +15,28 @@ interface FileCollectionProps {
 const collections = {
   all: {
     title: "Все файлы",
-    description: "Заметки, холсты и базы вашего пространства.",
+    description: "",
     action: "new-note",
     create: "Новая заметка",
     Icon: FileText,
   },
   note: {
     title: "Заметки",
-    description: "Мысли и знания, к которым хочется вернуться.",
+    description: "",
     action: "new-note",
     create: "Новая заметка",
     Icon: FileText,
   },
   canvas: {
     title: "Холсты",
-    description: "Соберите идеи рядом и посмотрите на общую картину.",
+    description: "",
     action: "new-canvas",
     create: "Новый холст",
     Icon: PanelsTopLeft,
   },
   base: {
     title: "Базы",
-    description: "Ваши заметки в таблицах, карточках и на досках.",
+    description: "",
     action: "new-base",
     create: "Новая база",
     Icon: Table2,
@@ -91,7 +83,6 @@ export default function FileCollection({
             <info.Icon size={25} />
           </span>
           <h1>{info.title}</h1>
-          <p>{info.description}</p>
         </div>
         <button className="primary" onClick={() => onCreate(info.action)}>
           <Plus size={16} />
@@ -136,7 +127,6 @@ export default function FileCollection({
                         ? "База"
                         : "Заметка"}
                   </span>
-                  <ArrowUpRight size={14} />
                 </span>
                 <strong>{fileTitle(file.path)}</strong>
                 <small>

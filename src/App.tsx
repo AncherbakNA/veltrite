@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
+import { plural } from "../shared/format";
 import { frontmatter, indexNote, resolveLink } from "../shared/markdown";
 import type { HistoryItem, PluginInfo, Preferences } from "../shared/types";
 import { VaultFilesContext } from "./VaultContext";
@@ -291,7 +292,7 @@ export default function App() {
     run(async () => {
       setSettings(false);
       await workspace.flush();
-      const result = await api().importObsidian();
+      const result = await api().importFolder();
       if (result) {
         await workspace.switchVault(result.vault);
         setDialog({
@@ -646,7 +647,7 @@ export default function App() {
                   <button onClick={() => run(() => chooseVault(false))}>
                     Открыть папку…
                   </button>
-                  <button onClick={importVault}>Импортировать Obsidian…</button>
+                  <button onClick={importVault}>Импортировать папку…</button>
                 </div>
               )}
               <main className="workspace">
@@ -995,7 +996,9 @@ export default function App() {
                 {current && !home && !graph && !collection && (
                   <>
                     <span>{currentIndex?.words || 0} слов</span>
-                    <span>{current.content.length} символов</span>
+                    <span>
+                      {plural(current.content.length, ["символ", "символа", "символов"])}
+                    </span>
                   </>
                 )}
               </div>

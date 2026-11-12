@@ -1,0 +1,95 @@
+{
+  "nodes": [
+    {
+      "id": "group",
+      "type": "group",
+      "x": -40,
+      "y": -60,
+      "width": 1020,
+      "height": 620,
+      "label": "Сайт",
+      "color": "3"
+    },
+    {
+      "id": "plan",
+      "type": "file",
+      "file": "Проекты/Сайт.md",
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 330,
+      "color": "3"
+    },
+    {
+      "id": "tasks",
+      "type": "text",
+      "text": "Проверка перед публикацией\n\n☐ Мобильная навигация\n☐ Изображения\n☐ Контактная форма",
+      "x": 380,
+      "y": 0,
+      "width": 300,
+      "height": 210,
+      "color": "4"
+    },
+    {
+      "id": "week",
+      "type": "file",
+      "file": "Проекты/План недели.md",
+      "x": 380,
+      "y": 290,
+      "width": 300,
+      "height": 210
+    },
+    {
+      "id": "links",
+      "type": "text",
+      "text": "Материалы\n\nТексты разделов\nФотографии\nКонтактные данные",
+      "x": 760,
+      "y": 60,
+      "width": 260,
+      "height": 210,
+      "color": "2"
+    },
+    {
+      "id": "site",
+      "type": "link",
+      "url": "https://example.com",
+      "x": 760,
+      "y": 360,
+      "width": 260,
+      "height": 120
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "plan",
+      "toNode": "tasks",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "проверить"
+    },
+    {
+      "id": "e2",
+      "fromNode": "tasks",
+      "toNode": "week",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "сроки"
+    },
+    {
+      "id": "e3",
+      "fromNode": "links",
+      "toNode": "tasks",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "e4",
+      "fromNode": "week",
+      "toNode": "site",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "публикация"
+    }
+  ]
+}

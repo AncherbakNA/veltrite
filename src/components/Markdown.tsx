@@ -137,7 +137,7 @@ function Embedded({
   if (/\.(mp4|mov)$/i.test(relative)) return <video controls src={assetUrl(relative)} />;
   return (
     <button className="inline-link" onClick={() => onLink(target)}>
-      ↗ {relative}
+      {relative}
     </button>
   );
 }

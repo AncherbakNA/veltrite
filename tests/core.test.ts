@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decrypt, encrypt, newRecoveryKey, parseRecoveryKey } from "../electron/crypto";
-import { importObsidian } from "../electron/importer";
+import { importFolder } from "../electron/importer";
 import { mergeSnapshots } from "../electron/merge";
 import { relativePath, safePath } from "../electron/paths";
 import { Vault, hash } from "../electron/vault";
@@ -276,7 +276,7 @@ describe("Файлы, история и корзина", () => {
     expect((await vault.read("a.md")).content).toBe("external");
   });
 });
-describe("Импорт Obsidian", () => {
+describe("Импорт папки", () => {
   it("копирует структуру и холсты без изменения оригинала и исполнения плагинов", async () => {
     const source = path.join(temp, "source"),
       destination = path.join(temp, "dest");
@@ -296,7 +296,7 @@ describe("Импорт Obsidian", () => {
     );
     await fs.writeFile(path.join(source, "рисунок.png"), Buffer.from([0, 1, 2, 255]));
     const before = await fs.readFile(path.join(source, "Учёба", "Пример.md"));
-    const result = await importObsidian(source, destination);
+    const result = await importFolder(source, destination);
     expect(result.imported).toBe(3);
     expect(await fs.readFile(path.join(destination, "Учёба", "Пример.md"))).toEqual(
       before,
@@ -305,11 +305,11 @@ describe("Импорт Obsidian", () => {
     expect(await fs.readFile(path.join(destination, "Схема.canvas"), "utf8")).toBe(
       canvas,
     );
-    expect(result.warnings.join(" ")).toContain("плагинов");
+    expect(result.warnings.join(" ")).toContain("плагин");
   });
   it("отказывает при импорте внутрь исходника и в непустую папку", async () => {
     await fs.mkdir(path.join(temp, "child"));
-    await expect(importObsidian(temp, path.join(temp, "child"))).rejects.toThrow("друг");
+    await expect(importFolder(temp, path.join(temp, "child"))).rejects.toThrow("друг");
   });
 });
 describe("Индекс и открытые форматы", () => {

@@ -1,5 +1,6 @@
 import { Focus, GitBranch } from "lucide-react";
 import { useMemo, useState } from "react";
+import { plural } from "../../shared/format";
 import { resolveLink } from "../../shared/markdown";
 import type { NoteIndex } from "../../shared/types";
 export default function Graph({
@@ -83,7 +84,9 @@ export default function Graph({
         <div>
           <GitBranch size={19} />
           <h2>Граф знаний</h2>
-          <span className="badge">{graph.nodes.length} заметок</span>
+          <span className="badge">
+            {plural(graph.nodes.length, ["заметка", "заметки", "заметок"])}
+          </span>
         </div>
         <div>
           <input

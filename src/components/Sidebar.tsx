@@ -171,7 +171,7 @@ export default function Sidebar({
       >
         <span className="vault-avatar">{vault.name.slice(0, 1).toUpperCase()}</span>
         <span>
-          <small>РАБОЧЕЕ ПРОСТРАНСТВО</small>
+          <small>Хранилище</small>
           <strong>{vault.name}</strong>
         </span>
         <ChevronDown size={15} />
@@ -408,10 +408,10 @@ export default function Sidebar({
                 </strong>
                 <p>
                   {filter === "canvas"
-                    ? "Соберите идеи на одном холсте."
+                    ? "Создайте холст через меню «+»."
                     : filter === "base"
                       ? "Объедините заметки в таблицу или доску."
-                      : "Начните с одной мысли — остальное придёт."}
+                      : "Создайте заметку через меню «+»."}
                 </p>
                 <button
                   className="text-link"
@@ -459,7 +459,7 @@ export default function Sidebar({
             )}
             {!query.trim() ? (
               <div className="search-guide">
-                <strong>Найдите нужную мысль</strong>
+                <strong>Поиск по заметкам</strong>
                 <p>Ищем по тексту и названиям заметок.</p>
                 <button onClick={() => setQuery("tag:")}>
                   <code>tag:</code>
@@ -502,7 +502,7 @@ export default function Sidebar({
           ) : (
             <div className="sidebar-empty">
               <Star size={24} />
-              <strong>Самое важное — под рукой</strong>
+              <strong>Нет закладок</strong>
               <p>Откройте заметку и нажмите звезду вверху. Она появится здесь.</p>
             </div>
           ))}
@@ -527,15 +527,15 @@ export default function Sidebar({
           ) : (
             <div className="sidebar-empty">
               <Hash size={24} />
-              <strong>У каждой идеи есть тема</strong>
-              <p>Добавьте в заметку #тег — так проще находить связанные мысли.</p>
+              <strong>Нет тегов</strong>
+              <p>Добавьте #тег в текст или свойство tags.</p>
             </div>
           ))}
       </div>
       <div className="sidebar-bottom">
         <button className="sidebar-import" onClick={() => onAction("import")}>
           <Import size={15} />
-          <span>Импорт из Obsidian</span>
+          <span>Импорт из папки</span>
         </button>
         <div className="sidebar-utilities">
           <button onClick={() => onAction("settings")} aria-label="Настройки">

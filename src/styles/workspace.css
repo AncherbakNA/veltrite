@@ -461,7 +461,6 @@
 }
 .search-field:focus-within {
   border-color: var(--accent-ink);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .search-field input {
   width: 100%;
@@ -565,7 +564,6 @@
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
-  box-shadow: 0 14px 45px #0005;
 }
 .vault-menu > strong {
   display: block;
@@ -775,7 +773,6 @@
 .view-toggle button.active {
   color: var(--text);
   background: var(--surface);
-  box-shadow: 0 1px 3px #0002;
 }
 .toolbar-divider {
   width: 1px;
@@ -1232,7 +1229,6 @@
   background: #b2bdcf;
 }
 .sample-system {
-  background: linear-gradient(110deg, #fcfdff 48%, #1c212b 49%);
 }
 .sample-system > i {
   background: #e7edf7;

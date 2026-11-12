@@ -32,7 +32,7 @@ test.beforeEach(async () => {
   await fs.mkdir(root);
   await fs.writeFile(
     path.join(root, "Начало.md"),
-    "---\ntags: [начало]\nstatus: active\n---\n# Место для ваших мыслей\n\nТекст заметки и [[Вторая]] связь.\n\n## План\n- [ ] Написать идею\n\n$$E=mc^2$$\n",
+    "---\ntags: [начало]\nstatus: active\n---\n# Начало\n\nТекст заметки и [[Вторая]] связь.\n\n## План\n- [ ] Проверить план\n\n$$E=mc^2$$\n",
   );
   await fs.writeFile(path.join(root, "Вторая.md"), "# Вторая\n\nСвязь на [[Начало]].");
   await launch();
@@ -148,9 +148,7 @@ test("экспорт сайта и отдельный веб-просмотр б
       })),
     ).toEqual({ api: undefined, node: undefined });
     await browser.getByRole("link", { name: "Начало", exact: true }).click();
-    await expect(
-      browser.getByRole("heading", { name: "Место для ваших мыслей" }),
-    ).toBeVisible();
+    await expect(browser.getByRole("heading", { name: "Начало" })).toBeVisible();
     await browser.close();
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -158,8 +156,8 @@ test("экспорт сайта и отдельный веб-просмотр б
     );
   }
 });
-test("импорт структуры Obsidian, относительные вложения и чтение холста", async () => {
-  const source = path.join(temp, "obsidian"),
+test("импорт структуры папки, относительные вложения и чтение холста", async () => {
+  const source = path.join(temp, "source-folder"),
     destination = path.join(temp, "imported");
   await fs.mkdir(path.join(source, "Раздел"), { recursive: true });
   await fs.mkdir(path.join(source, "Вложения"), { recursive: true });
@@ -174,7 +172,7 @@ test("импорт структуры Obsidian, относительные вл�
       {
         id: "a",
         type: "text",
-        text: "Из Obsidian",
+        text: "Из исходной папки",
         x: 0,
         y: 0,
         width: 300,
@@ -194,7 +192,7 @@ test("импорт структуры Obsidian, относительные вл�
     },
     [source, destination],
   );
-  await page.getByRole("button", { name: "Импорт из Obsidian", exact: true }).click();
+  await page.getByRole("button", { name: "Импорт из папки", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Импорт завершён" })).toBeVisible();
   await page.getByRole("button", { name: "Понятно", exact: true }).click();
   await page.locator(".tree-file").filter({ hasText: "Пример" }).click();
@@ -208,7 +206,7 @@ test("импорт структуры Obsidian, относительные вл�
     .toBeGreaterThan(0);
   await page.locator(".tree-file").filter({ hasText: "Карта" }).click();
   await expect(page.getByRole("textbox", { name: "Текст карточки" })).toHaveValue(
-    "Из Obsidian",
+    "Из исходной папки",
   );
   expect(await fs.readFile(path.join(destination, "Карта.canvas"), "utf8")).toBe(canvas);
   expect(await fs.readFile(path.join(source, "Раздел", "Пример.md"), "utf8")).toBe(
@@ -266,7 +264,7 @@ test("редактирование, перезапуск, поиск, чтени
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
-  await expect(page.locator(".cm-content")).toContainText("Место для ваших мыслей");
+  await expect(page.locator(".cm-content")).toContainText("Начало");
   await page.locator(".cm-content").click();
   await page.keyboard.press(`${modifier}+End`);
   await page.keyboard.type("\n\nТекст после редактирования.");
@@ -274,7 +272,7 @@ test("редактирование, перезапуск, поиск, чтени
     .poll(() => fs.readFile(path.join(root, "Начало.md"), "utf8"))
     .toContain("Текст после редактирования.");
   await page.getByRole("button", { name: "Чтение", exact: true }).click();
-  await expect(page.locator(".reading-pane h1")).toHaveText("Место для ваших мыслей");
+  await expect(page.locator(".reading-pane h1")).toHaveText("Начало");
   await expect(page.locator(".katex").first()).toBeVisible();
   await page.locator(".reading-pane a").filter({ hasText: "Вторая" }).hover();
   await expect(page.getByRole("tooltip")).toContainText("Связь на");
@@ -421,9 +419,7 @@ test("главная и коллекции сохраняют открытые �
   await page.keyboard.press(`${modifier}+End`);
   await page.keyboard.type(" Правка перед переходом на главную.");
   await page.getByRole("button", { name: "Главная", exact: true }).click();
-  await expect(page.locator(".workspace-home h1")).toContainText(
-    "Всё начинается с мысли",
-  );
+  await expect(page.locator(".workspace-home h1")).toContainText("vault");
   await expect(page.locator(".tab")).toHaveCount(1);
   await page.getByRole("button", { name: "Открыть холсты", exact: true }).click();
   await expect(page.locator(".collection-heading h1")).toHaveText("Холсты");
@@ -468,12 +464,12 @@ test("в компактном окне навигация и режимы дос
   await page.getByRole("button", { name: "Поиск", exact: true }).click();
   const search = page.getByRole("textbox", { name: "Поиск по содержимому", exact: true });
   await expect(search).toBeFocused();
-  await expect(page.locator(".search-guide")).toContainText("Найдите нужную мысль");
+  await expect(page.locator(".search-guide")).toContainText("Поиск по заметкам");
   await search.fill("Несуществующая фраза 9375");
   await expect(page.locator(".sidebar-empty")).toContainText("Ничего не найдено");
-  await search.fill("Место для ваших мыслей");
+  await search.fill("Текст заметки");
   await expect(page.locator(".search-result")).toHaveCount(1);
-  await expect(page.locator(".search-result")).toContainText("Начало");
+  await expect(page.locator(".search-result")).toContainText("Текст заметки");
   await page.getByRole("button", { name: "Очистить поиск", exact: true }).click();
   await expect(page.locator(".search-guide")).toBeVisible();
 });

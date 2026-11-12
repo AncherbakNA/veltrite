@@ -18,7 +18,7 @@ import { ConfigStore } from "./config";
 import { newRecoveryKey, parseRecoveryKey } from "./crypto";
 import { exportSite, type StaticPage } from "./export-site";
 import { beginDeviceLogin, finishDeviceLogin, GitHub } from "./github";
-import { importObsidian } from "./importer";
+import { importFolder } from "./importer";
 import { safePath } from "./paths";
 import { Plugins } from "./plugins";
 import { synchronize, type SyncCheckpoint } from "./sync";
@@ -222,9 +222,9 @@ const methods: Record<string, (...args: any[]) => any> = {
       throw Error("Эта папка не была открыта пользователем");
     return serial.run(() => openVault(root));
   },
-  importObsidian: async () => {
+  importFolder: async () => {
     const source = await dialog.showOpenDialog(mainWindow, {
-      title: "Выберите хранилище Obsidian",
+      title: "Выберите папку для импорта",
       properties: ["openDirectory"],
     });
     if (source.canceled) return null;
@@ -234,7 +234,7 @@ const methods: Record<string, (...args: any[]) => any> = {
     });
     if (destination.canceled) return null;
     return serial.run(async () => {
-      const result = await importObsidian(source.filePaths[0], destination.filePaths[0]);
+      const result = await importFolder(source.filePaths[0], destination.filePaths[0]);
       result.vault = await openVault(destination.filePaths[0]);
       return result;
     });
@@ -743,7 +743,7 @@ app
           },
           { label: "Новый холст", click: () => emit("new-canvas") },
           { label: "Открыть хранилище…", click: () => emit("open-vault") },
-          { label: "Импорт из Obsidian…", click: () => emit("import") },
+          { label: "Импорт из папки…", click: () => emit("import") },
           { type: "separator" },
           { label: "Экспорт PDF…", click: () => emit("pdf") },
           {
@@ -800,30 +800,22 @@ app.on("window-all-closed", () => {
   app.quit();
 });
 const welcomeNote = `---
-tags: [начало]
+tags: [справка]
 ---
-# Место для ваших мыслей
+# Начало
 
-Добро пожаловать в **Veltrite**. Заметки живут в обычной папке на вашем компьютере.
+Заметки хранятся в выбранной папке как Markdown-файлы.
 
-## Начните с идеи
+## Основные действия
 
-- Создайте заметку: **⌘/Ctrl + N**
-- Найдите команду: **⌘/Ctrl + P**
-- Перейдите к заметке: **⌘/Ctrl + O**
-- Свяжите мысли через \`[[название заметки]]\`
-- Откройте **холст**, чтобы разложить идеи в пространстве
+- **⌘/Ctrl + N** — новая заметка
+- **⌘/Ctrl + O** — перейти к файлу
+- **⌘/Ctrl + P** — палитра команд
+- **⌘/Ctrl + E** — правка и чтение
 
-> [!tip] Всё под вашим контролем
-> Можно открыть готовую папку Obsidian или импортировать её копию.
+## Ссылки и файлы
 
-## План на сегодня
+Напишите \`[[Название заметки]]\`, чтобы создать ссылку. Вложения можно добавлять через палитру команд.
 
-- [ ] Записать первую мысль
-- [ ] Создать связь между заметками
-- [ ] Подключить приватный репозиторий в настройках
-
-$$
-E = mc^2
-$$
+Для копирования готовой папки выберите **Импорт из папки** в меню хранилища.
 `;

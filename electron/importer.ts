@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { plural } from "../shared/format";
 import type { ImportResult, Preferences } from "../shared/types";
 import { canonicalRoot, relativePath, safePath } from "./paths";
 import { Vault } from "./vault";
-export async function importObsidian(
+export async function importFolder(
   sourceRoot: string,
   destinationRoot: string,
 ): Promise<ImportResult> {
@@ -86,7 +87,7 @@ export async function importObsidian(
         (settings as any)[field] = value;
       } catch {
         warnings.push(
-          `Настройка ${field} оставлена по умолчанию: специальный путь Obsidian`,
+          `Настройка ${field} оставлена по умолчанию: неподдерживаемый путь к папке`,
         );
       }
     }
@@ -96,11 +97,8 @@ export async function importObsidian(
     const plugins = await fs.readdir(await safePath(source, ".obsidian/plugins", true));
     if (plugins.length)
       warnings.push(
-        `Обнаружено ${plugins.length} плагинов Obsidian. Их код не запускается автоматически; совместимость требует отдельной проверки.`,
+        `Обнаружено ${plural(plugins.length, ["плагин", "плагина", "плагинов"])}. Они не входят в импорт; используйте расширения Veltrite.`,
       );
   } catch {}
-  warnings.push(
-    "Файлы .canvas и .base скопированы без преобразования. Расширенные представления Bases и API плагинов Obsidian могут отличаться.",
-  );
   return { imported, skipped, warnings, vault: await vault.info() };
 }
