@@ -836,3 +836,30 @@ test("большой холст сохраняет все карточки и о
     saved.nodes.every((n: { extra: { preserve: boolean } }) => n.extra.preserve),
   ).toBe(true);
 });
+
+test("граф отображает более 500 заметок, дерево файлов остаётся компактным", async () => {
+  await application.close();
+  const files = Array.from({ length: 1600 }, (_, i) => ({
+    name: `n${String(i).padStart(4, "0")}.md`,
+    text: `# Узел ${i}\n[[n${String((i + 1) % 1600).padStart(4, "0")}]]`,
+  }));
+  for (let offset = 0; offset < files.length; offset += 32)
+    await Promise.all(
+      files
+        .slice(offset, offset + 32)
+        .map((file) => fs.writeFile(path.join(root, file.name), file.text)),
+    );
+  await launch();
+  expect(await page.locator(".tree-file").count()).toBeLessThan(100);
+  await page.getByRole("button", { name: "Граф знаний", exact: true }).click();
+  await expect(page.locator(".graph-canvas")).toHaveAttribute(
+    "aria-label",
+    "Граф: 1602 заметок",
+  );
+  await page.getByPlaceholder("Найти в графе…").fill("n1599");
+  await expect(page.locator(".graph-node")).toHaveCount(1);
+  await page.locator(".graph-node").click();
+  await expect(page.locator(".tab.active")).toContainText("n1599");
+  await expect(page.locator(".tree-row.active")).toContainText("n1599");
+  expect(await page.locator(".tree-file").count()).toBeLessThan(100);
+});

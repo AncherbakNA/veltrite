@@ -1,8 +1,9 @@
 import { Focus, GitBranch } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { plural } from "../../shared/format";
-import { resolveLink } from "../../shared/markdown";
+import type { GraphData } from "../../shared/graph";
 import type { NoteIndex } from "../../shared/types";
+import GraphCanvas from "./GraphCanvas";
 export default function Graph({
   index,
   onOpen,
@@ -15,69 +16,31 @@ export default function Graph({
   const [query, setQuery] = useState(""),
     [local, setLocal] = useState(false),
     [hovered, setHovered] = useState<string | null>(null);
-  const graph = useMemo(() => {
-    const paths = index.map((n) => n.path),
-      edges = index.flatMap((n) =>
-        n.links.flatMap((link) => {
-          const target = resolveLink(link, n.path, paths, index);
-          return target && target !== n.path ? [{ from: n.path, to: target }] : [];
-        }),
-      );
-    const connected = new Set(
-      edges
-        .filter((e) => e.from === active || e.to === active)
-        .flatMap((e) => [e.from, e.to]),
-    );
-    const notes = index
-      .filter(
-        (n) =>
-          (!query ||
-            n.title.toLowerCase().includes(query.toLowerCase()) ||
-            n.tags.some((t) => t.includes(query))) &&
-          (!local || n.path === active || connected.has(n.path)),
-      )
-      .slice(0, 500);
-    const nodes = notes.map((n, i) => ({
-      ...n,
-      x:
-        500 +
-        Math.cos(i * 2.399963) * Math.sqrt((i + 1) / Math.max(1, notes.length)) * 330,
-      y:
-        330 +
-        Math.sin(i * 2.399963) * Math.sqrt((i + 1) / Math.max(1, notes.length)) * 260,
-      degree: edges.filter((e) => e.from === n.path || e.to === n.path).length,
-    }));
-    const byPath = new Map(nodes.map((n) => [n.path, n]));
-    const neighbors = new Map<string, Set<string>>();
-    for (const edge of edges) {
-      if (!byPath.has(edge.from) || !byPath.has(edge.to)) continue;
-      if (!neighbors.has(edge.from)) neighbors.set(edge.from, new Set());
-      if (!neighbors.has(edge.to)) neighbors.set(edge.to, new Set());
-      neighbors.get(edge.from)!.add(edge.to);
-      neighbors.get(edge.to)!.add(edge.from);
-    }
-    for (let iteration = 0; iteration < 50; iteration++)
-      for (const node of nodes) {
-        let dx = (500 - node.x) * 0.002,
-          dy = (330 - node.y) * 0.002;
-        for (const other of nodes) {
-          if (node === other) continue;
-          const x = node.x - other.x,
-            y = node.y - other.y,
-            distance = Math.max(30, Math.hypot(x, y));
-          dx += (x / (distance * distance)) * 12;
-          dy += (y / (distance * distance)) * 12;
-        }
-        for (const neighbor of neighbors.get(node.path) || []) {
-          const other = byPath.get(neighbor)!;
-          dx += (other.x - node.x) * 0.003;
-          dy += (other.y - node.y) * 0.003;
-        }
-        node.x = Math.max(50, Math.min(950, node.x + dx));
-        node.y = Math.max(50, Math.min(600, node.y + dy));
-      }
-    return { nodes, edges };
+  const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] }),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState("");
+  useEffect(() => {
+    setLoading(true);
+    setError("");
+    const worker = new Worker(new URL("../workers/graph.ts", import.meta.url), {
+      type: "module",
+    });
+    worker.onmessage = (event) => {
+      if (event.data.error) setError(event.data.error);
+      else setGraph(event.data.graph);
+      setLoading(false);
+    };
+    worker.onerror = () => {
+      setError("Не удалось построить граф");
+      setLoading(false);
+    };
+    worker.postMessage({ index, query, local, active });
+    return () => worker.terminate();
   }, [index, query, local, active]);
+  const byPath = useMemo(
+    () => new Map(graph.nodes.map((node) => [node.path, node])),
+    [graph],
+  );
   return (
     <div className="graph-view">
       <div className="graph-toolbar">
@@ -100,16 +63,24 @@ export default function Graph({
           </button>
         </div>
       </div>
+      {loading && (
+        <small className="graph-status" role="status">
+          Строим граф…
+        </small>
+      )}
+      {error && <div className="save-error">{error}</div>}
       {!graph.nodes.length ? (
         <div className="canvas-empty">
           <h2>Здесь появятся связи</h2>
           <p>Создавайте заметки и связывайте их через [[двойные скобки]]</p>
         </div>
+      ) : graph.nodes.length > 1000 ? (
+        <GraphCanvas graph={graph} active={active} onOpen={onOpen} />
       ) : (
         <svg className="graph-svg" viewBox="0 0 1000 660">
           {graph.edges.map((edge, i) => {
-            const a = graph.nodes.find((n) => n.path === edge.from),
-              b = graph.nodes.find((n) => n.path === edge.to);
+            const a = byPath.get(edge.from),
+              b = byPath.get(edge.to);
             return a && b ? (
               <line
                 key={i}
@@ -126,6 +97,15 @@ export default function Graph({
               key={node.path}
               className={"graph-node " + (node.path === active ? "current" : "")}
               transform={`translate(${node.x},${node.y})`}
+              role="button"
+              tabIndex={0}
+              aria-label={node.title}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onOpen(node.path);
+                }
+              }}
               onClick={() => onOpen(node.path)}
               onMouseEnter={() => setHovered(node.path)}
               onMouseLeave={() => setHovered(null)}
@@ -137,6 +117,15 @@ export default function Graph({
             </g>
           ))}
         </svg>
+      )}
+      {query && graph.nodes.length > 1000 && (
+        <div className="graph-results">
+          {graph.nodes.slice(0, 40).map((node) => (
+            <button key={node.path} onClick={() => onOpen(node.path)}>
+              {node.title}
+            </button>
+          ))}
+        </div>
       )}
       <div className="graph-legend">
         <i />

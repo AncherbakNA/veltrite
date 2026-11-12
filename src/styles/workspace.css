@@ -967,3 +967,7 @@
   text-align: center;
   color: var(--muted);
 }
+.virtual-tree .tree-row {
+  height: 28px;
+  min-height: 28px;
+}

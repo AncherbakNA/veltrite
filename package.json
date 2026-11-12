@@ -39,7 +39,8 @@
     "@replit/codemirror-vim": "^6.3.0",
     "jsep": "^1.4.0",
     "@fontsource/source-serif-4": "5.3.1",
-    "leaflet": "1.9.4"
+    "leaflet": "1.9.4",
+    "d3-force": "3.0.1"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0",
@@ -54,7 +55,8 @@
     "vite": "8.3.8",
     "vitest": "5.1.0",
     "prettier": "^3.6.2",
-    "@types/leaflet": "1.9.21"
+    "@types/leaflet": "1.9.21",
+    "@types/d3-force": "3.0.10"
   },
   "build": {
     "appId": "app.veltrite.desktop",

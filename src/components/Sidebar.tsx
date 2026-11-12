@@ -19,7 +19,7 @@ import {
   Table2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { NoteIndex, SearchResult, VaultInfo } from "../../shared/types";
 import { primaryKey } from "../ui";
 import { api } from "../useVault";
@@ -79,24 +79,83 @@ export default function Sidebar({
   const [createMenu, setCreateMenu] = useState(false);
   const [filterMenu, setFilterMenu] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
-  const tags = [...new Set(index.flatMap((note) => note.tags))].sort((a, b) =>
-    a.localeCompare(b, "ru"),
+  const pendingReveal = useRef<string | null>(null);
+  const scrollHost = useRef<HTMLDivElement>(null),
+    [scrollTop, setScrollTop] = useState(0),
+    [viewportHeight, setViewportHeight] = useState(900);
+  const tags = useMemo(
+    () =>
+      [...new Set(index.flatMap((note) => note.tags))].sort((a, b) =>
+        a.localeCompare(b, "ru"),
+      ),
+    [index],
   );
-  const parentFolders = new Set<string>();
-  if (filter !== "all")
-    for (const file of vault.files.filter((file) => file.kind === filter)) {
-      const parts = file.path.split("/");
-      for (let depth = 1; depth < parts.length; depth++)
-        parentFolders.add(parts.slice(0, depth).join("/"));
+  const visible = useMemo(() => {
+    const parents = new Set<string>();
+    if (filter !== "all")
+      for (const file of vault.files)
+        if (file.kind === filter) {
+          const parts = file.path.split("/");
+          for (let depth = 1; depth < parts.length; depth++)
+            parents.add(parts.slice(0, depth).join("/"));
+        }
+    return vault.files.filter(
+      (file) =>
+        (filter === "all" || file.kind === filter || parents.has(file.path)) &&
+        ![...collapsed].some((folder) => file.path.startsWith(folder + "/")),
+    );
+  }, [vault.files, filter, collapsed]);
+  const fileCount = useMemo(
+    () =>
+      vault.files.filter(
+        (file) => file.kind !== "folder" && (filter === "all" || file.kind === filter),
+      ).length,
+    [vault.files, filter],
+  );
+  const virtual = visible.length > 200;
+  const first = virtual
+    ? Math.max(0, Math.min(visible.length - 1, Math.floor(scrollTop / 28) - 12))
+    : 0;
+  const end = virtual
+    ? Math.min(visible.length, first + Math.ceil(viewportHeight / 28) + 24)
+    : visible.length;
+  useEffect(() => {
+    const host = scrollHost.current;
+    if (!host) return;
+    const observer = new ResizeObserver((entries) =>
+      setViewportHeight(entries[0].contentRect.height),
+    );
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (scrollHost.current) {
+      scrollHost.current.scrollTop = 0;
+      setScrollTop(0);
     }
-  const visible = vault.files.filter(
-    (file) =>
-      (filter === "all" || file.kind === filter || parentFolders.has(file.path)) &&
-      ![...collapsed].some((folder) => file.path.startsWith(folder + "/")),
-  );
-  const fileCount = vault.files.filter(
-    (file) => file.kind !== "folder" && (filter === "all" || file.kind === filter),
-  ).length;
+  }, [section, filter]);
+  useEffect(() => {
+    if (!active || section !== "files") return;
+    pendingReveal.current = active;
+    setCollapsed((old) => {
+      const next = new Set(old);
+      for (const folder of old) if (active.startsWith(folder + "/")) next.delete(folder);
+      return next.size === old.size ? old : next;
+    });
+  }, [active, section]);
+  useEffect(() => {
+    if (!active || pendingReveal.current !== active || section !== "files") return;
+    const position = visible.findIndex((file) => file.path === active),
+      host = scrollHost.current;
+    if (
+      host &&
+      position >= 0 &&
+      (position * 28 < host.scrollTop ||
+        (position + 1) * 28 > host.scrollTop + host.clientHeight)
+    )
+      host.scrollTop = Math.max(0, position * 28 - host.clientHeight / 2);
+    if (position >= 0) pendingReveal.current = null;
+  }, [active, section, visible]);
 
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
@@ -288,11 +347,25 @@ export default function Sidebar({
           </div>
         )}
       </div>
-      <div className="sidebar-scroll">
+      <div
+        className="sidebar-scroll"
+        ref={scrollHost}
+        onScroll={(event) => {
+          setScrollTop(event.currentTarget.scrollTop);
+          setContext(null);
+        }}
+      >
         {section === "files" && (
           <>
-            <div className="file-tree">
-              {visible.map((file) => {
+            <div
+              className={"file-tree" + (virtual ? " virtual-tree" : "")}
+              style={
+                virtual
+                  ? { paddingTop: first * 28, paddingBottom: (visible.length - end) * 28 }
+                  : undefined
+              }
+            >
+              {visible.slice(first, end).map((file) => {
                 const Icon =
                   file.kind === "folder"
                     ? Folder

@@ -2,6 +2,7 @@ import { Check, Clock3, FolderOpen, GitBranch, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { plural } from "../shared/format";
+import { linkResolver } from "../shared/graph";
 import { frontmatter, indexNote, resolveLink } from "../shared/markdown";
 import { headingId, referenceBlocks } from "../shared/markdown-blocks";
 import { leaves } from "../shared/panes";
@@ -506,32 +507,42 @@ export default function App() {
     }
     [...commands, ...pluginCommands].find((c) => c.id === action)?.run();
   };
-  const currentIndex = current?.path.toLowerCase().endsWith(".md")
-    ? indexNote(current.path, current.content)
-    : null;
+  const resolveNote = useMemo(
+    () =>
+      linkResolver(
+        index.map((note) => note.path),
+        index,
+      ),
+    [index],
+  );
+  const backlinksByPath = useMemo(() => {
+    const result = new Map<string, typeof index>();
+    for (const note of index) {
+      const targets = new Set<string>();
+      for (const link of note.links) {
+        const target = resolveNote(link, note.path);
+        if (!target || target === note.path || targets.has(target)) continue;
+        targets.add(target);
+        const incoming = result.get(target) || [];
+        incoming.push(note);
+        result.set(target, incoming);
+      }
+    }
+    return result;
+  }, [index, resolveNote]);
+  const currentIndex = useMemo(
+    () =>
+      current?.path.toLowerCase().endsWith(".md")
+        ? indexNote(current.path, current.content)
+        : null,
+    [current?.path, current?.content],
+  );
   const outgoing =
     currentIndex?.links.map((target) => ({
       target,
-      resolved: resolveLink(
-        target,
-        current!.path,
-        index.map((n) => n.path),
-        index,
-      ),
+      resolved: resolveNote(target, current!.path),
     })) || [];
-  const backlinks = index.filter(
-    (n) =>
-      n.path !== current?.path &&
-      n.links.some(
-        (link) =>
-          resolveLink(
-            link,
-            n.path,
-            index.map((n) => n.path),
-            index,
-          ) === current?.path,
-      ),
-  );
+  const backlinks = backlinksByPath.get(current?.path || "") || [];
   const footnotes = current?.content.match(/^\[\^[^\]]+\]:.+$/gm) || [];
   const setProperty = (key: string, value: string) => {
     if (!current) return;

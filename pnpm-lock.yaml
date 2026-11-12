@@ -38,6 +38,9 @@ importers:
       codemirror:
         specifier: 6.0.2
         version: 6.0.2
+      d3-force:
+        specifier: 3.0.1
+        version: 3.0.1
       jsep:
         specifier: ^1.4.0
         version: 1.6.0
@@ -78,6 +81,9 @@ importers:
       '@playwright/test':
         specifier: 1.65.0
         version: 1.65.0
+      '@types/d3-force':
+        specifier: 3.0.10
+        version: 3.0.10
       '@types/leaflet':
         specifier: 1.9.21
         version: 1.9.21
