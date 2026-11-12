@@ -20,7 +20,19 @@ function run(path, args = []) {
   if (p.error) throw p.error;
   if (p.status !== 0) process.exit(p.status || 1);
 }
+async function bundleSearch() {
+  mkdirSync("dist-electron", { recursive: true });
+  await build({
+    entryPoints: ["electron/search-worker.ts"],
+    outfile: "dist-electron/search-worker.cjs",
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    target: "node22",
+  });
+}
 async function bundle() {
+  await bundleSearch();
   mkdirSync("dist-electron", { recursive: true });
   await build({
     entryPoints: ["electron/main.ts"],
@@ -51,8 +63,10 @@ async function bundle() {
   });
 }
 if (task === "check") run("node_modules/typescript/lib/tsc.js", ["--noEmit"]);
-else if (task === "test") run("node_modules/vitest/vitest.mjs", ["run"]);
-else if (task === "format") {
+else if (task === "test") {
+  await bundleSearch();
+  run("node_modules/vitest/vitest.mjs", ["run"]);
+} else if (task === "format") {
   run("scripts/organize.mjs");
   const marker = JSON.parse(readFileSync(".veltrite-workspace.json", "utf8"));
   run("node_modules/prettier/bin/prettier.cjs", [

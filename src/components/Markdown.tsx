@@ -200,14 +200,12 @@ export default function Markdown({
                 onClick={(event) => {
                   event.preventDefault();
                   if (href?.startsWith("#"))
-                    document
-                      .getElementById(href.slice(1))
-                      ?.scrollIntoView({
-                        behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
-                          .matches
-                          ? "auto"
-                          : "smooth",
-                      });
+                    document.getElementById(href.slice(1))?.scrollIntoView({
+                      behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+                        .matches
+                        ? "auto"
+                        : "smooth",
+                    });
                   else if (/^https?:/.test(href || "")) api().openExternal(href!);
                   else if (href) onLink(href);
                 }}

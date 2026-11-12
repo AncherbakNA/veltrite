@@ -1,3 +1,4 @@
+import type { WorkspaceSession } from "./panes";
 export type Theme = "dark" | "light" | "system";
 export interface Preferences {
   theme: Theme;
@@ -175,7 +176,7 @@ export interface PluginInfo {
   commands: { id: string; name: string; action: string; value?: string }[];
 }
 export interface AppState {
-  session: { tabs: string[]; active: string | null } | null;
+  session: WorkspaceSession | null;
   version: string;
   recent: { root: string; name: string }[];
   vault: VaultInfo | null;
@@ -239,12 +240,9 @@ export interface VeltriteAPI {
   plugins(): Promise<PluginInfo[]>;
   installPlugin(): Promise<PluginInfo | null>;
   togglePlugin(id: string, enabled: boolean): Promise<void>;
-  workspaceSave(
-    name: string,
-    data: { tabs: string[]; active: string | null },
-  ): Promise<void>;
-  saveSession(data: { tabs: string[]; active: string | null }): Promise<void>;
-  workspaces(): Promise<{ name: string; tabs: string[]; active: string | null }[]>;
+  workspaceSave(name: string, data: WorkspaceSession): Promise<void>;
+  saveSession(data: WorkspaceSession): Promise<void>;
+  workspaces(): Promise<(WorkspaceSession & { name: string })[]>;
   onChange(callback: () => void): () => void;
   onMenu(callback: (action: string) => void): () => void;
   closeReady(): void;

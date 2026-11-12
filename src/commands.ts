@@ -74,8 +74,6 @@ export function buildCommands(context: CommandContext): Command[] {
     selection,
     setDialog,
     setPalette,
-    tabs,
-    active,
     setSlides,
   } = context;
   return [
@@ -189,6 +187,21 @@ export function buildCommands(context: CommandContext): Command[] {
       id: "split",
       name: "Редактор и предпросмотр рядом",
       run: () => setMode("split"),
+    },
+    {
+      id: "pane-right",
+      name: "Разделить панель вправо",
+      run: () => workspace.splitPane("row"),
+    },
+    {
+      id: "pane-below",
+      name: "Разделить панель вниз",
+      run: () => workspace.splitPane("column"),
+    },
+    {
+      id: "pane-close",
+      name: "Закрыть текущую панель",
+      run: () => workspace.closePane(workspace.activePane),
     },
     {
       id: "template",
@@ -379,10 +392,7 @@ export function buildCommands(context: CommandContext): Command[] {
           placeholder: "Название",
           confirm: "Сохранить",
           onSubmit: async (name) => {
-            await api().workspaceSave(name, {
-              tabs: tabs.map((t) => t.path),
-              active,
-            });
+            await api().workspaceSave(name, workspace.sessionData());
             message("Набор вкладок сохранён");
           },
         }),
@@ -403,6 +413,10 @@ export function buildCommands(context: CommandContext): Command[] {
                   for (const path of w.tabs)
                     if (vault?.files.some((f) => f.path === path))
                       await workspace.open(path);
+                  workspace.restoreLayout(
+                    w,
+                    w.tabs.filter((path) => vault?.files.some((f) => f.path === path)),
+                  );
                   if (w.active) await open(w.active);
                 }),
             })),

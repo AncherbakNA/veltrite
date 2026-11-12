@@ -2,9 +2,12 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Columns2,
   Ellipsis,
   PenLine,
+  Rows2,
   Star,
+  X,
 } from "lucide-react";
 import type { EditorMode } from "../commands";
 import { primaryKey } from "../ui";
@@ -18,6 +21,8 @@ interface DocumentToolbarProps {
   bookmarked: boolean;
   onBookmark: () => void;
   onActions: () => void;
+  onSplit: (direction: "row" | "column") => void;
+  onClosePane?: () => void;
 }
 export default function DocumentToolbar({
   path,
@@ -28,6 +33,8 @@ export default function DocumentToolbar({
   bookmarked,
   onBookmark,
   onActions,
+  onSplit,
+  onClosePane,
 }: DocumentToolbarProps) {
   const visual = /\.(canvas|base)$/i.test(path);
   const reading = mode === "read";
@@ -78,6 +85,32 @@ export default function DocumentToolbar({
         >
           <Star size={16} />
         </button>
+        <button
+          className="icon-button"
+          title="Разделить вправо"
+          aria-label="Разделить вправо"
+          onClick={() => onSplit("row")}
+        >
+          <Columns2 size={16} />
+        </button>
+        <button
+          className="icon-button"
+          title="Разделить вниз"
+          aria-label="Разделить вниз"
+          onClick={() => onSplit("column")}
+        >
+          <Rows2 size={16} />
+        </button>
+        {onClosePane && (
+          <button
+            className="icon-button"
+            title="Закрыть панель"
+            aria-label="Закрыть панель"
+            onClick={onClosePane}
+          >
+            <X size={16} />
+          </button>
+        )}
         <button
           className="icon-button"
           title="Действия с документом"

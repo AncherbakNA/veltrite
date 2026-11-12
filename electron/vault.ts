@@ -15,6 +15,7 @@ import { mapLimit } from "./concurrency";
 import { canonicalRoot, ensureParent, relativePath, safePath } from "./paths";
 import { mergePreferences } from "./preferences";
 import { movedPath, rewriteMarkdownLinks } from "./rename-links";
+import { runSearch } from "./search";
 export const hash = (data: Buffer | string) =>
   createHash("sha256").update(data).digest("hex");
 export const MAX_FILE = 32 * 1024 * 1024;
@@ -45,7 +46,11 @@ export class Vault {
   root: string;
   id = "";
   preferences: Preferences = { ...defaultPreferences };
-  constructor(root: string) {
+  private searchController: AbortController | null = null;
+  constructor(
+    root: string,
+    private searchWorker = path.resolve("dist-electron/search-worker.cjs"),
+  ) {
     this.root = root;
   }
   private meta(relative: string) {
@@ -388,64 +393,23 @@ export class Vault {
   }
   async search(query: string) {
     if (typeof query !== "string" || query.length > 500)
-      throw Error("Слишком длинный запрос");
-    const tokens = (query.match(/(?:[^\s"]+|"[^"]*")+/g) || []).map((token) => {
-      const negative = token.startsWith("-");
-      return {
-        negative,
-        value: (negative ? token.slice(1) : token).replace(/"/g, "").toLocaleLowerCase(),
-      };
-    });
-    const results: { path: string; line: number; text: string }[] = [];
-    for (const file of (await this.list()).filter((file) => file.kind === "note")) {
-      const text = (await this.read(file.path)).content,
-        note = indexNote(file.path, text),
-        lower = text.toLocaleLowerCase();
-      const match = (value: string) =>
-        value.startsWith("path:")
-          ? file.path.toLocaleLowerCase().includes(value.slice(5))
-          : value.startsWith("tag:")
-            ? note.tags.some(
-                (tag) =>
-                  tag.toLocaleLowerCase() === value.slice(4) ||
-                  tag.toLocaleLowerCase().startsWith(value.slice(4) + "/"),
-              )
-            : lower.includes(value) || file.path.toLocaleLowerCase().includes(value);
-      if (
-        !tokens.every((token) =>
-          token.negative ? !match(token.value) : match(token.value),
-        )
-      )
-        continue;
-      const terms = tokens
-        .filter((token) => !token.negative && !/^(tag|path):/.test(token.value))
-        .map((token) => token.value);
-      const lines = text.split("\n");
-      let count = 0;
-      for (let i = 0; i < lines.length && results.length < 500; i++)
-        if (
-          terms.length &&
-          terms.some((term) => lines[i].toLocaleLowerCase().includes(term))
-        ) {
-          results.push({
-            path: file.path,
-            line: i + 1,
-            text: lines[i].slice(0, 250),
-          });
-          if (++count >= 5) break;
-        }
-      if (!count) {
-        const line = note.headings[0]?.line || 1;
-        results.push({
-          path: file.path,
-          line,
-          text: lines[line - 1]?.slice(0, 250) || "",
-        });
-      }
-      if (results.length >= 500) break;
+      throw Error("Запрос должен быть короче 500 символов");
+    this.searchController?.abort();
+    const controller = new AbortController();
+    this.searchController = controller;
+    try {
+      if (!query.trim()) return [];
+      const notes = await this.index();
+      const documents = await mapLimit(notes, 8, async (note) => {
+        if (controller.signal.aborted) throw Error("Поиск отменён");
+        return { note, text: (await this.read(note.path)).content };
+      });
+      return await runSearch(this.searchWorker, documents, query, controller.signal);
+    } finally {
+      if (this.searchController === controller) this.searchController = null;
     }
-    return results;
   }
+
   async snapshot(): Promise<Snapshot> {
     const result: Snapshot = Object.create(null);
     let size = 0;

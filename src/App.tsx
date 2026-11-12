@@ -1,9 +1,10 @@
 import { Check, Clock3, FolderOpen, GitBranch, X } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { plural } from "../shared/format";
 import { frontmatter, indexNote, resolveLink } from "../shared/markdown";
 import { headingId, referenceBlocks } from "../shared/markdown-blocks";
+import { leaves } from "../shared/panes";
 import type { HistoryItem, PluginInfo, Preferences } from "../shared/types";
 import { VaultFilesContext } from "./VaultContext";
 import { buildCommands } from "./commands";
@@ -15,22 +16,19 @@ import {
   type DialogData,
 } from "./components/Dialog";
 import DocumentBoundary from "./components/DocumentBoundary";
-import DocumentToolbar from "./components/DocumentToolbar";
+import DocumentPane from "./components/DocumentPane";
 import FileCollection from "./components/FileCollection";
 import Inspector from "./components/Inspector";
 import Markdown from "./components/Markdown";
+import PaneTree from "./components/PaneTree";
 import Sidebar, { type FileFilter } from "./components/Sidebar";
 import Welcome from "./components/Welcome";
 import WindowTabs from "./components/WindowTabs";
 import WorkspaceHome from "./components/WorkspaceHome";
 import { scrollToNoteAnchor } from "./navigation";
 import { api, useVault } from "./useVault";
-const Editor = lazy(() => import("./components/Editor"));
-const Canvas = lazy(() => import("./components/Canvas"));
 const Graph = lazy(() => import("./components/Graph"));
-const Bases = lazy(() => import("./components/Bases"));
 const Settings = lazy(() => import("./components/Settings"));
-type Mode = "live" | "source" | "read" | "split";
 export default function App() {
   const [toast, setToast] = useState<{
       message: string;
@@ -44,13 +42,13 @@ export default function App() {
   }, []);
   const error = useCallback((text: string) => message(text, true), [message]);
   const workspace = useVault(error);
-  const { state, tabs, active, current, index } = workspace;
+  const { state, tabs, active, current, index, mode } = workspace;
+  const setMode = workspace.setPaneMode;
   const vault = state?.vault || null,
     preferences = vault?.preferences;
   const currentRef = useRef(current);
   currentRef.current = current;
   const [section, setSection] = useState("files"),
-    [mode, setMode] = useState<Mode>("live"),
     [graph, setGraph] = useState(false),
     [home, setHome] = useState(false),
     [fileFilter, setFileFilter] = useState<FileFilter>("all"),
@@ -150,14 +148,14 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const open = useCallback(
-    (path: string) =>
+    (path: string, paneId?: string) =>
       run(async () => {
         const entry = vault?.files.find((f) => f.path === path);
         if (entry?.kind === "attachment") {
           await api().openAttachment(path);
           return;
         }
-        await workspace.open(path);
+        await workspace.open(path, paneId);
         setGraph(false);
         setHome(false);
         setCollection(null);
@@ -213,13 +211,17 @@ export default function App() {
       },
     });
   };
-  const openLink = (target: string) => {
+  const openLink = (
+    target: string,
+    from = current?.path || "",
+    paneId = workspace.activePane,
+  ) => {
     const paths =
       vault?.files.filter((f) => f.kind !== "folder").map((f) => f.path) || [];
-    const resolved = resolveLink(target, current?.path || "", paths, index);
+    const resolved = resolveLink(target, from, paths, index);
     if (resolved)
       run(async () => {
-        await open(resolved);
+        await open(resolved, paneId);
         const subpath = target.split("#")[1];
         if (!subpath) return;
         const tab = tabs.find((t) => t.path === resolved),
@@ -236,11 +238,12 @@ export default function App() {
           scrollToNoteAnchor(
             resolved,
             subpath.startsWith("^") ? "block-" + subpath.slice(1) : headingId(subpath),
+            paneId,
           );
           if (heading || block)
             window.dispatchEvent(
               new CustomEvent("veltrite:goto", {
-                detail: { path: resolved, line: heading?.line || block!.line },
+                detail: { path: resolved, line: heading?.line || block!.line, paneId },
               }),
             );
         }, 60);
@@ -328,12 +331,12 @@ export default function App() {
       await workspace.refresh();
       await open(path);
     });
-  const bookmark = () =>
+  const bookmark = (path = current?.path) =>
     run(async () => {
-      if (!current || !preferences) return;
-      const list = preferences.bookmarks.includes(current.path)
-        ? preferences.bookmarks.filter((p) => p !== current.path)
-        : [...preferences.bookmarks, current.path];
+      if (!path || !preferences) return;
+      const list = preferences.bookmarks.includes(path)
+        ? preferences.bookmarks.filter((p) => p !== path)
+        : [...preferences.bookmarks, path];
       updatePreferences(await api().preferences({ bookmarks: list }));
     });
   const record = () =>
@@ -562,6 +565,10 @@ export default function App() {
     setSection("files");
     setRecentOpen(false);
   }, [vault?.root]);
+  const vaultPaths = useMemo(
+    () => vault?.files.filter((f) => f.kind !== "folder").map((f) => f.path) || [],
+    [vault?.files],
+  );
   if (!state)
     return (
       <div className="loading-screen">
@@ -570,9 +577,7 @@ export default function App() {
       </div>
     );
   return (
-    <VaultFilesContext.Provider
-      value={vault?.files.filter((f) => f.kind !== "folder").map((f) => f.path) || []}
-    >
+    <VaultFilesContext.Provider value={vaultPaths}>
       <div className="app-shell">
         <WindowTabs
           tabs={tabs}
@@ -668,7 +673,7 @@ export default function App() {
               )}
               <main className="workspace">
                 <DocumentBoundary
-                  key={(current?.path || "") + mode + graph + home + collection}
+                  key={vault.root + graph + home + collection}
                   onSource={() => {
                     setGraph(false);
                     setMode("source");
@@ -689,180 +694,58 @@ export default function App() {
                         onCreate={(action) => actionRef.current(action)}
                       />
                     ) : current && !home ? (
-                      <>
-                        <DocumentToolbar
-                          path={current.path}
-                          mode={mode}
-                          setMode={setMode}
-                          canGoBack={historyPosition.current > 0}
-                          onBack={() => {
-                            if (historyPosition.current > 0) {
-                              historyPosition.current--;
-                              run(() =>
-                                workspace.open(
-                                  openHistory.current[historyPosition.current],
-                                ),
-                              );
-                            }
-                          }}
-                          bookmarked={preferences!.bookmarks.includes(current.path)}
-                          onBookmark={bookmark}
-                          onActions={() =>
-                            setPalette({
-                              commands: commands.filter((command) =>
-                                [
-                                  "source",
-                                  "split",
-                                  "reading",
-                                  "history",
-                                  "html",
-                                  "pdf",
-                                  "slides",
-                                  "compose",
-                                  "extract",
-                                  "attachment",
-                                  "template",
-                                  "bookmark",
-                                  "reveal",
-                                ].includes(command.id),
-                              ),
-                            })
-                          }
-                        />
-                        {current.error && (
-                          <div className="save-error">
-                            <span>{current.error}</span>
-                            <button
-                              onClick={() => {
-                                const draft = current.content;
-                                setDialog({
-                                  title: "Сохранить вашу правку отдельной заметкой",
-                                  initial:
-                                    current.path.replace(/\.[^.]+$/, "") +
-                                    " (моя правка)",
-                                  onSubmit: async (name) => {
-                                    const path = name + ".md";
-                                    await api().create(path, draft);
-                                    await open(path);
-                                  },
-                                });
+                      <PaneTree
+                        layout={workspace.layout}
+                        activePane={workspace.activePane}
+                        onFocus={workspace.focusPane}
+                        onResize={workspace.resizePane}
+                        renderPane={(pane) => {
+                          const current = tabs.find((t) => t.path === pane.path);
+                          if (!current)
+                            return (
+                              <div className="empty-pane">
+                                <p>Откройте файл в этой панели</p>
+                                <button onClick={quickOpen}>Выбрать файл</button>
+                                {leaves(workspace.layout).length > 1 && (
+                                  <button onClick={() => workspace.closePane(pane.id)}>
+                                    Закрыть панель
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          return (
+                            <DocumentPane
+                              current={current}
+                              pane={pane}
+                              workspace={workspace}
+                              index={index}
+                              preferences={preferences!}
+                              vault={vault}
+                              open={open}
+                              openLink={openLink}
+                              bookmark={bookmark}
+                              commands={commands}
+                              pluginCommands={pluginCommands}
+                              setDialog={setDialog}
+                              setPalette={setPalette}
+                              setSelection={setSelection}
+                              onAction={(id) => actionRef.current(id)}
+                              canGoBack={historyPosition.current > 0}
+                              onBack={() => {
+                                if (historyPosition.current > 0) {
+                                  historyPosition.current--;
+                                  run(() =>
+                                    workspace.open(
+                                      openHistory.current[historyPosition.current],
+                                      pane.id,
+                                    ),
+                                  );
+                                }
                               }}
-                            >
-                              Сохранить копию
-                            </button>
-                            <button
-                              onClick={() =>
-                                setDialog({
-                                  title: "Закрыть несохранённый черновик?",
-                                  description:
-                                    "Текст в этой вкладке будет закрыт. Сначала сохраните копию, если он нужен. Файл на диске останется без изменений.",
-                                  input: false,
-                                  danger: true,
-                                  confirm: "Закрыть черновик",
-                                  onSubmit: () => workspace.discard(current.path),
-                                })
-                              }
-                            >
-                              Закрыть черновик
-                            </button>
-                          </div>
-                        )}
-                        {current.path.toLowerCase().endsWith(".canvas") &&
-                        mode !== "source" ? (
-                          <Canvas
-                            key={current.path}
-                            content={current.content}
-                            onChange={(text) => workspace.edit(current.path, text)}
-                            index={index}
-                            onOpen={open}
-                            onChooseFile={(add) =>
-                              setPalette({
-                                placeholder: "Выберите файл для холста…",
-                                commands: vault.files
-                                  .filter(
-                                    (f) => f.kind !== "folder" && f.path !== current.path,
-                                  )
-                                  .map((f) => ({
-                                    id: f.path,
-                                    name: f.path,
-                                    run: () => add(f.path),
-                                  })),
-                              })
-                            }
-                            onChooseLink={(add) =>
-                              setDialog({
-                                title: "Ссылка на холсте",
-                                placeholder: "https://…",
-                                confirm: "Добавить",
-                                onSubmit: (value) => {
-                                  if (!/^https?:\/\//i.test(value))
-                                    throw Error("Введите ссылку HTTP или HTTPS");
-                                  add(value);
-                                },
-                              })
-                            }
-                          />
-                        ) : current.path.toLowerCase().endsWith(".base") &&
-                          mode !== "source" ? (
-                          <Bases
-                            content={current.content}
-                            index={index}
-                            files={vault.files}
-                            onOpen={open}
-                            onChange={(text) => workspace.edit(current.path, text)}
-                          />
-                        ) : (
-                          <div
-                            className={
-                              "document-content mode-" +
-                              mode +
-                              (preferences!.readableLineLength ? " readable" : "")
-                            }
-                          >
-                            {mode !== "read" && (
-                              <div className="writing-pane">
-                                <Editor
-                                  key={current.path}
-                                  content={current.content}
-                                  path={current.path}
-                                  index={index}
-                                  onChange={(text) => workspace.edit(current.path, text)}
-                                  preferences={preferences!}
-                                  onLink={openLink}
-                                  onCommand={(onPick) =>
-                                    setPalette({
-                                      commands: [...commands, ...pluginCommands].map(
-                                        (command) => ({
-                                          ...command,
-                                          run: () => {
-                                            onPick?.();
-                                            setTimeout(
-                                              () => actionRef.current(command.id),
-                                              0,
-                                            );
-                                          },
-                                        }),
-                                      ),
-                                    })
-                                  }
-                                  onSelection={setSelection}
-                                  live={mode !== "source"}
-                                />
-                              </div>
-                            )}
-                            {(mode === "read" || mode === "split") && (
-                              <div className="reading-pane">
-                                <Markdown
-                                  content={current.content}
-                                  path={current.path}
-                                  index={index}
-                                  onLink={openLink}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </>
+                            />
+                          );
+                        }}
+                      />
                     ) : (
                       <WorkspaceHome
                         vault={vault}

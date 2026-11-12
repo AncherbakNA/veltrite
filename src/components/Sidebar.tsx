@@ -457,7 +457,11 @@ export default function Sidebar({
                   <code>path:</code>
                   <span>В определённой папке</span>
                 </button>
-                <small>Точную фразу заключите в кавычки.</small>
+                <small>
+                  Фраза: «&quot;точный текст&quot;». Группы: (слово OR другое) -tag:архив.
+                  Свойства: [status: active], [rating:&gt;=3]. Регулярные выражения:
+                  /текст/i.
+                </small>
               </div>
             ) : !searching && !results.length && !searchError ? (
               <div className="sidebar-empty">

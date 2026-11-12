@@ -24,6 +24,7 @@ const colors = HighlightStyle.define([
 export default function Editor({
   content,
   path,
+  paneId,
   index,
   onChange,
   preferences,
@@ -34,6 +35,7 @@ export default function Editor({
 }: {
   content: string;
   path: string;
+  paneId?: string;
   index: NoteIndex[];
   onChange: (text: string) => void;
   preferences: Preferences;
@@ -231,7 +233,8 @@ export default function Editor({
       if (
         detail &&
         typeof detail === "object" &&
-        detail.path !== previewData.current.path
+        (detail.path !== previewData.current.path ||
+          (detail.paneId && detail.paneId !== paneId))
       )
         return;
       const requested = Number(typeof detail === "object" ? detail.line : detail);

@@ -13,6 +13,7 @@ import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { normalizeSession, type WorkspaceSession } from "../shared/panes";
 import type { Preferences, SyncStatus } from "../shared/types";
 import { ConfigStore } from "./config";
 import { newRecoveryKey, parseRecoveryKey } from "./crypto";
@@ -97,7 +98,7 @@ function notify() {
   if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("vault:changed");
 }
 async function openVault(root: string) {
-  const next = new Vault(root);
+  const next = new Vault(root, path.join(__dirname, "search-worker.cjs"));
   await next.open();
   vault = next;
   syncError = null;
@@ -584,10 +585,7 @@ const methods: Record<string, (...args: any[]) => any> = {
     return plugins.install(result.filePaths[0]);
   },
   togglePlugin: (id: string, enabled: boolean) => plugins.toggle(id, enabled),
-  workspaceSave: async (
-    name: string,
-    data: { tabs: string[]; active: string | null },
-  ) => {
+  workspaceSave: async (name: string, data: WorkspaceSession) => {
     if (
       typeof name !== "string" ||
       !name.trim() ||
@@ -596,32 +594,24 @@ const methods: Record<string, (...args: any[]) => any> = {
       data.tabs.some((t) => typeof t !== "string")
     )
       throw Error("Некорректное рабочее пространство");
+    const normalized = normalizeSession(data);
     const key = "workspaces-" + secretId();
     const all = await store.readLocal<any[]>(key, []);
     await store.writeLocal(
       key,
-      [
-        { name: name.trim(), tabs: data.tabs, active: data.active },
-        ...all.filter((w) => w.name !== name),
-      ].slice(0, 20),
+      [{ name: name.trim(), ...normalized }, ...all.filter((w) => w.name !== name)].slice(
+        0,
+        20,
+      ),
     );
   },
-  saveSession: async (data: { tabs: string[]; active: string | null }) => {
+  saveSession: async (data: WorkspaceSession) => {
     const current = needVault();
-    if (
-      !Array.isArray(data.tabs) ||
-      data.tabs.length > 100 ||
-      data.tabs.some((p) => typeof p !== "string")
-    )
-      throw Error("Некорректный список вкладок");
     const files = await current.list();
-    const paths = data.tabs.filter((p) =>
-      files.some((f) => f.path === p && ["note", "canvas", "base"].includes(f.kind)),
+    const allowed = new Set(
+      files.filter((f) => ["note", "canvas", "base"].includes(f.kind)).map((f) => f.path),
     );
-    await store.writeLocal("session-" + secretId(), {
-      tabs: paths,
-      active: data.active && paths.includes(data.active) ? data.active : null,
-    });
+    await store.writeLocal("session-" + secretId(), normalizeSession(data, allowed));
   },
   workspaces: () => store.readLocal("workspaces-" + secretId(), []),
 };

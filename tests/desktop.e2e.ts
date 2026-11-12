@@ -302,6 +302,10 @@ test("редактирование, перезапуск, поиск, чтени
   await launch();
   await expect(page.locator(".tab")).toHaveCount(2);
   await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await expect(page.locator(".reading-pane")).toContainText(
+    "Текст после редактирования.",
+  );
+  await page.getByRole("button", { name: "Правка", exact: true }).click();
   await expect(page.locator(".cm-content")).toContainText("Текст после редактирования.");
   await page.getByRole("button", { name: "Чтение", exact: true }).click();
   await page.screenshot({ path: "../screenshots/editor.png" });
@@ -656,4 +660,60 @@ test("предпросмотр ссылки доступен в редактор
   await expect(page.locator(".tab.active")).toContainText("Цель");
   await expect(page.locator(".reading-pane #block-part")).toHaveText("Точный фрагмент");
   await expect(page.locator(".reading-pane")).not.toContainText("^part");
+});
+
+test("разделённые панели сохраняют файлы, режимы и общий черновик после перезапуска", async () => {
+  await page.locator(".tree-file").filter({ hasText: "Начало" }).click();
+  await page.getByRole("button", { name: "Разделить вправо", exact: true }).click();
+  await expect(page.locator(".document-leaf")).toHaveCount(2);
+  const left = page.locator(".document-leaf").nth(0),
+    right = page.locator(".document-leaf").nth(1);
+  await right.locator(".cm-content").click();
+  await page.keyboard.press(`${modifier}+End`);
+  await page.keyboard.type(" ОБЩИЙ ЧЕРНОВИК");
+  await expect(left.locator(".cm-content")).toContainText("ОБЩИЙ ЧЕРНОВИК");
+  await page.locator(".tree-file").filter({ hasText: "Вторая" }).click();
+  await right.getByRole("button", { name: "Чтение", exact: true }).click();
+  await expect(right.locator(".reading-pane")).toContainText("Вторая");
+  await expect(left.locator(".cm-content")).toContainText("Начало");
+  await page.getByRole("separator", { name: "Размер панелей" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("separator", { name: "Размер панелей" })).toHaveAttribute(
+    "aria-valuenow",
+    "55",
+  );
+  await page.keyboard.press(`${modifier}+s`);
+  await application.close();
+  await launch();
+  await expect(page.locator(".document-leaf")).toHaveCount(2);
+  await expect(
+    page.locator(".document-leaf").nth(0).locator(".cm-content"),
+  ).toContainText("ОБЩИЙ ЧЕРНОВИК");
+  await expect(
+    page.locator(".document-leaf").nth(1).locator(".reading-pane"),
+  ).toContainText("Вторая");
+  await page
+    .locator(".document-leaf")
+    .nth(1)
+    .getByRole("button", { name: "Закрыть панель", exact: true })
+    .click();
+  await expect(page.locator(".document-leaf")).toHaveCount(1);
+  expect(await fs.readFile(path.join(root, "Начало.md"), "utf8")).toContain(
+    "ОБЩИЙ ЧЕРНОВИК",
+  );
+});
+
+test("расширенный поиск сочетает группы, свойства и регулярные выражения", async () => {
+  await page.getByRole("button", { name: "Поиск", exact: true }).first().click();
+  const input = page.getByPlaceholder("Текст, tag:тег, path:папка");
+  await input.fill(
+    "(content:/Текст.*заметки/iu OR file:Вторая) [status:active] -tag:архив",
+  );
+  await expect(page.locator(".search-result")).toHaveCount(1);
+  await expect(page.locator(".search-result")).toContainText("Начало");
+  await input.fill("(Начало OR");
+  await expect(page.locator(".search-summary")).toContainText("условие");
+  await input.fill("file:Вторая NOT [status]");
+  await expect(page.locator(".search-result")).toHaveCount(1);
+  await expect(page.locator(".search-result")).toContainText("Вторая");
 });
